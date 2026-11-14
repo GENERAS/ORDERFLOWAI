@@ -148,7 +148,7 @@ The script is `scripts/day4-catalogue-tests.mjs`. It uses the publishable key fo
 PostgREST/storage calls, and direct PostgreSQL access only for setup and cleanup. No service-role
 key is used.
 
-Covered cases (59 checks):
+Covered cases (60 checks):
 
 1. Bucket is private with the expected size and MIME limits.
 2. Anonymous catalogue reads are denied.
@@ -157,7 +157,7 @@ Covered cases (59 checks):
 5. Attribute creation with options and variant/required metadata.
 6. Staff can create, update and archive products, variants and attribute values.
 7. Product currency, SKU normalization and validation errors.
-8. Search filters, total counts and active-variant counts.
+8. Search filters, total counts, active-variant counts and server-side pagination.
 9. Removed variants are kept but marked inactive.
 10. Product and cross-table variant SKU conflicts.
 11. Archived products are filterable and can be restored.

@@ -281,7 +281,7 @@ npm run test:catalogue
 The suite exercises taxonomy permissions, category cycles, product creation/update, soft variant
 removal, search and filtering, SKU conflicts across tables, currency enforcement, archival,
 cross-tenant denial, hard-delete prevention, private uploads, signed URLs, MIME rejection and
-image-path validation. It runs 59 checks against the linked project and cleans up its test users,
+image-path validation. It runs 60 checks against the linked project and cleans up its test users,
 businesses and storage objects.
 
 ## Authentication and onboarding (Day 3)
@@ -432,7 +432,7 @@ The following are scheduled for later phases and deliberately excluded from Days
 - [x] Catalogue tables, constraints, indexes and triggers defined.
 - [x] Row Level Security and role matrix enforced for all catalogue tables.
 - [x] Atomic `create_product`, `update_product` and `create_product_attribute` RPCs.
-- [x] Server-side product search with category, brand, status and pagination filters.
+- [x] Server-side product search and pagination with category, brand and status filters.
 - [x] Category hierarchy with cycle prevention.
 - [x] Products archive instead of hard-delete; removed variants become inactive.
 - [x] SKU and barcode uniqueness enforced across products and variants.
@@ -441,7 +441,7 @@ The following are scheduled for later phases and deliberately excluded from Days
 - [x] Catalogue list, product editor, category, brand and attribute pages implemented.
 - [x] Role-aware taxonomy controls and member product/image access.
 - [x] Day 4 catalogue/storage/RLS integration tests pass.
-- [x] Day 3 auth tests, lint and production build still pass.
+- [x] Day 2 RLS isolation, Day 3 auth tests, lint and production build still pass.
 - [x] Day 4 migration applied to the linked Supabase project.
 
 ## License

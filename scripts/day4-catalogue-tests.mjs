@@ -548,6 +548,40 @@ try {
     1,
   );
 
+  const paginationProductRpc = await staff.client.rpc('create_product', {
+    p_business_id: businessA,
+    p_name: 'Day Four Pagination Product',
+    p_sku: `${runId}-page`,
+    p_price: 500,
+    p_status: 'active',
+  });
+  const searchPageOne = await staff.client.rpc('search_products', {
+    p_business_id: businessA,
+    p_search: runId,
+    p_limit: 1,
+    p_offset: 0,
+  });
+  const searchPageTwo = await staff.client.rpc('search_products', {
+    p_business_id: businessA,
+    p_search: runId,
+    p_limit: 1,
+    p_offset: 1,
+  });
+  check(
+    'search_products paginates server-side with a stable total count',
+    !paginationProductRpc.error &&
+      !searchPageOne.error &&
+      !searchPageTwo.error &&
+      searchPageOne.data?.length === 1 &&
+      searchPageTwo.data?.length === 1 &&
+      searchPageOne.data?.[0]?.id !== searchPageTwo.data?.[0]?.id &&
+      Number(searchPageOne.data?.[0]?.total_count) === 2 &&
+      Number(searchPageTwo.data?.[0]?.total_count) === 2,
+    paginationProductRpc.error?.message ??
+      searchPageOne.error?.message ??
+      searchPageTwo.error?.message,
+  );
+
   const duplicateSkuRpc = await staff.client.rpc('create_product', {
     p_business_id: businessA,
     p_name: 'Duplicate SKU Product',
