@@ -13,8 +13,9 @@ Day 6 turns the Customers placeholder into a real multi-tenant customer module. 
 - Customer list, create/edit form, customer detail and address dialog.
 - Customer, address, duplicate and RLS integration tests.
 
-Day 6 does **not** add orders, payments or AI workflows. The customer detail page shows an explicit
-order-history placeholder; no order records are created or invented.
+Day 6 does **not** add orders, payments or AI workflows. At the end of Day 6, the customer detail
+page showed an explicit order-history placeholder; no order records were created or invented.
+Day 7 later replaced that placeholder with real recent order history.
 
 ## Migration
 
@@ -141,12 +142,12 @@ earliest remaining address is promoted.
 | --- | --- |
 | `/customers` | Searchable, sortable, paginated customer list. |
 | `/customers/new` | Create a customer with contact validation and duplicate checks. |
-| `/customers/:customerId` | Contact details, addresses, notes and order-history placeholder. |
+| `/customers/:customerId` | Contact details, addresses, notes and recent order history. |
 | `/customers/:customerId/edit` | Edit the customer profile. |
 
 The customer list shows contact methods, company, primary address and address count. The editor
 shows blocking duplicate warnings before submit. The detail page manages addresses through an
-accessible dialog and explains that order history is not available until the orders module is built.
+accessible dialog and shows the five most recent orders once the Day 7 order module is available.
 
 ## Services and helpers
 
@@ -224,4 +225,5 @@ Covered cases (136 checks):
 - Search uses bounded `ilike` matching because `pg_trgm` is unavailable.
 - Duplicate detection uses exact email/phone/name equality. It does not do fuzzy name matching.
 - Customer merge, deletion, import/export and activity timelines are not implemented.
-- Customer order history waits for the Day 7 orders module.
+- Customer order history is provided by the Day 7 order module; customer merge, deletion and
+  import/export remain future work.

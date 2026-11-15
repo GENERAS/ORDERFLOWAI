@@ -4,11 +4,12 @@ AI-powered product discovery and order automation for businesses. OrderFlow AI c
 customer conversations to a business's real product catalogue, order records, inventory and
 payments through a single multi-tenant SaaS workspace.
 
-> **Current status: Day 6 — customer management.**
+> **Current status: Day 7 — order management.**
 > The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
-> a real product catalogue, live inventory with physical, reserved and available stock, and
-> customer profiles with contact details, addresses and duplicate detection. Orders, payments
-> and AI remain later phases.
+> a real product catalogue, live inventory with physical, reserved and available stock,
+> customer profiles with contact details and duplicate detection, and orders with agreed prices,
+> activity history, lifecycle rules and automatic stock reservations. Payments and AI remain
+> later phases.
 
 ## What is included in this build
 
@@ -42,10 +43,15 @@ payments through a single multi-tenant SaaS workspace.
   defaults.
 - Server-side customer search across name, company, email, phone and address, plus duplicate detection
   before saving.
-- Customer list, create/edit forms, customer detail, address dialog and an order-history placeholder.
+- Customer list, create/edit forms, customer detail, address dialog and recent order history.
+- Order list with live metrics, search, status filters, sorting and pagination.
+- Order editor with customer selection, catalogue search, variants, quantities and agreed prices.
+- Order detail page with status actions, reservation state, totals, activity history and cancellation.
+- Per-business sequential order numbers and preserved customer/catalogue snapshots.
+- Strict order lifecycle with automatic reservation, release and stock consumption.
 - Reusable paginated data-access layer with normalised errors and a retry helper.
 - Shared domain constants and JSDoc types for future features.
-- ESLint configuration, auth/catalogue/inventory/customer integration tests and a documented
+- ESLint configuration, auth/catalogue/inventory/customer/order integration tests and a documented
   Supabase setup workflow.
 
 ## Technology stack
@@ -113,6 +119,7 @@ data-backed feature will remain unavailable until credentials are added.
 | `npm run test:catalogue` | Run Day 4 catalogue, storage and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:inventory` | Run Day 5 inventory balance, ledger, concurrency and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:customers` | Run Day 6 customer profile, duplicate, address and RLS integration tests (requires `.env.local` and the DB password) |
+| `npm run test:orders` | Run Day 7 order lifecycle, stock, numbering, snapshot and RLS integration tests (requires `.env.local` and the DB password) |
 
 ## Environment variables
 
@@ -163,7 +170,7 @@ src/
     workspaces/               Multi-workspace picker
     dashboard/                Dashboard page and dashboard-specific components
     inbox/                    Unified inbox module scaffold
-    orders/                   Orders module scaffold
+    orders/                   Order list, editor, detail, status actions, services and helpers
     products/                 Catalogue list, product editor, taxonomy pages, services and helpers
     inventory/                Stock dashboard, item detail, ledger, services and helpers
     customers/                Customer list, profile editor, detail, addresses and helpers
@@ -181,6 +188,7 @@ src/
     catalogueService.js       Catalogue CRUD, taxonomy, search and product-image storage
     inventoryService.js       Inventory search, metrics, stock operations and tracking settings
     customerService.js        Customer search, profiles, duplicate detection and addresses
+    orderService.js           Order search, catalogue, creation, editing, status and cancellation
     baseService.js            Paginated data-access layer and retry helper
   types/
     index.js                  Domain constants and JSDoc typedefs
@@ -190,6 +198,7 @@ scripts/
   day4-catalogue-tests.mjs    Catalogue, storage and RLS integration tests
   day5-inventory-tests.mjs    Inventory balance, ledger, concurrency and RLS integration tests
   day6-customer-tests.mjs     Customer profile, duplicate, address and RLS integration tests
+  day7-order-tests.mjs        Order lifecycle, stock, numbering, snapshot and RLS integration tests
 ```
 
 ### Architectural rules
@@ -215,6 +224,9 @@ scripts/
   immutable ledger row in the same transaction.
 - **Atomic customer writes.** Customer profiles and addresses are created or changed only through
   validated security-definer RPCs; the browser has select-only table access.
+- **Atomic order writes.** Order creation, editing, status changes and cancellation go through
+  security-definer RPCs. The database enforces numbering, snapshots, transition rules, totals and
+  stock reservation in the same transaction.
 - **Private image storage.** Product images use a private bucket, signed URLs and business-scoped
   storage policies.
 - **Lazy routes.** Pages are code-split via `React.lazy` to keep the initial bundle small.
@@ -249,6 +261,10 @@ scripts/
 - Customer tables grant select-only access to active members. Profile and address writes go through
   security-definer RPCs, and email/phone uniqueness is scoped per business.
 - Customer duplicate detection never reads outside the selected business.
+- Order tables grant select-only access to active members. Order writes go through security-definer
+  RPCs, and order activity cannot be updated after it is written.
+- Order numbers are generated atomically per business, and stock can only move through the validated
+  inventory ledger during confirmation, cancellation and completion.
 - No fake authentication, fake sessions or fake production data is implemented.
 
 ## Database (Day 2)
@@ -375,7 +391,7 @@ The schema and RPCs are in `supabase/migrations/20261116010000_day6_customer_man
 | --- | --- |
 | `/customers` | Searchable, sortable, paginated customer list. |
 | `/customers/new` | Create a customer with validated contact details. |
-| `/customers/:customerId` | Contact details, addresses, notes and order-history placeholder. |
+| `/customers/:customerId` | Contact details, addresses, notes and recent order history. |
 | `/customers/:customerId/edit` | Edit the customer profile. |
 
 **Customer model**
@@ -389,7 +405,7 @@ The schema and RPCs are in `supabase/migrations/20261116010000_day6_customer_man
   default promotes the earliest remaining address.
 - Addresses inherit the business country unless a valid two-letter country code is supplied.
 - Customer search covers name, company, email, phone and address text.
-- Customer order history is deliberately a placeholder until the orders module exists.
+- Customer order history now shows real orders created in the Day 7 order module.
 
 **Roles and RPCs**
 
@@ -410,6 +426,59 @@ The suite exercises profile validation, email/phone normalisation, duplicate blo
 search/sort/pagination, address defaults and promotion, role permissions, direct-write denial,
 cross-tenant RLS, duplicate-detection isolation and cleanup. It runs 136 checks against the linked
 project and cleans up its test users, businesses and customer records.
+
+## Order management (Day 7)
+
+Day 7 turns the Orders placeholder into a real order module with drafts, item pricing, lifecycle
+rules, activity history and automatic stock reservations. Full implementation notes and the test
+matrix are in [`docs/day7-orders.md`](docs/day7-orders.md).
+
+The schema and RPCs are in `supabase/migrations/20261117010000_day7_order_management.sql`.
+
+**Order routes**
+
+| Route | Purpose |
+| --- | --- |
+| `/orders` | Order list with metrics, search, status filters, sorting and pagination. |
+| `/orders/new` | Create an order, optionally prefilled with `?customerId=`. |
+| `/orders/:orderId` | Items, totals, customer, activity, stock state and lifecycle actions. |
+| `/orders/:orderId/edit` | Edit a draft or awaiting order. |
+
+**Order model**
+
+- Orders require a customer from the same business. Customer name, phone and email are snapshotted.
+- Items preserve product, variant and SKU snapshots while storing an agreed unit price. Omitting the
+  price copies the current catalogue price.
+- Totals are recalculated from line totals by a database trigger.
+- Order numbers use a per-business atomic counter: `ORD-00001`, `ORD-00002`, and so on.
+- Status moves strictly through `draft`, `awaiting_confirmation`, `confirmed`, `processing`, `ready`
+  and `completed`; cancellation is available until completion.
+- Only draft and awaiting orders can be edited. Confirmed orders cannot be changed.
+- Confirmation reserves tracked stock, cancellation releases it, and completion releases then reduces
+  physical stock. Untracked units create no stock movement.
+- Created, updated, status-change and cancellation events form an immutable activity history.
+- Customer detail pages show the five most recent orders and link to their detail pages.
+
+**Order roles and RPCs**
+
+- All four active roles can create, edit, advance and cancel orders.
+- Order tables are select-only for active members; direct insert/update/delete is denied.
+- `create_order`, `update_order`, `update_order_status` and `cancel_order` perform all writes.
+- `search_orders` powers the list, `search_order_catalogue` powers the editor and
+  `get_order_overview` supplies list metrics.
+
+**Order tests**
+
+```powershell
+. .\scripts\load-supabase-db-password.ps1
+npm run test:orders
+```
+
+The suite exercises numbering and concurrent creation, customer/catalogue snapshots, agreed prices,
+variant rules, validation errors, every legal and illegal status transition, stock reservation,
+cancellation release, completion consumption, activity immutability, direct-write denial,
+search/filter/sort/pagination, overview metrics, role permissions, cross-tenant RLS and cleanup.
+It runs 201 checks against the linked project and cleans up its test users and businesses.
 
 ## Authentication and onboarding (Day 3)
 
@@ -498,10 +567,10 @@ Vercel 404.
 
 ## Intentionally not built yet
 
-The following are scheduled for later phases and deliberately excluded from Days 1–6:
+The following are scheduled for later phases and deliberately excluded from Days 1–7:
 
 - Purchase orders, suppliers and automated replenishment.
-- Order and payment workflows, including real customer order history.
+- Payments, invoices and payment-provider workflows.
 - AI product discovery and AI order extraction.
 - WhatsApp, Instagram or Facebook integrations.
 - Visual/image product search.
@@ -606,6 +675,27 @@ The following are scheduled for later phases and deliberately excluded from Days
 - [x] Day 2 RLS isolation, Day 3 auth, Day 4 catalogue, Day 5 inventory, lint and production build
   still pass.
 - [x] Day 6 migration applied to the linked Supabase project.
+
+## Day 7 acceptance checklist
+
+- [x] Order counter, order, item and activity tables with constraints and indexes defined.
+- [x] Per-business sequential order numbers generated atomically.
+- [x] Required same-business customer with preserved customer snapshots.
+- [x] Catalogue item snapshots, agreed prices and generated line totals.
+- [x] Automatic order total recalculation.
+- [x] Strict forward-only lifecycle and reason-based cancellation.
+- [x] Editing limited to draft and awaiting orders.
+- [x] Stock reservation on confirmation, release on cancellation and consumption on completion.
+- [x] Immutable, append-only activity history with actor snapshots.
+- [x] Row Level Security and select-only client access for all order tables.
+- [x] Atomic order creation, editing, status and cancellation RPCs.
+- [x] Server-side order search, filters, sorting, pagination and overview metrics.
+- [x] Order list, create/edit editor, detail page and cancellation dialog implemented.
+- [x] Customer detail page shows real recent order history.
+- [x] Day 7 order/lifecycle/stock/RLS integration tests pass.
+- [x] Day 2 RLS isolation, Day 3 auth, Day 4 catalogue, Day 5 inventory, Day 6 customer, lint and
+  production build still pass.
+- [x] Day 7 migration applied to the linked Supabase project.
 
 ## License
 

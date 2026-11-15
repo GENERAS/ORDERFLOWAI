@@ -29,8 +29,16 @@ import {
   getCustomer,
   toCustomerServiceError,
 } from '../../services/customerService';
-import { formatDate, formatDateTime } from '../../utils/format';
+import {
+  searchOrders,
+  toOrderServiceError,
+} from '../../services/orderService';
+import { formatCurrency, formatDate, formatDateTime } from '../../utils/format';
 import { useAuth } from '../auth/authContext';
+import {
+  getOrderStatusBadge,
+  getStockStateLabel,
+} from '../orders/orderUtils';
 import { CustomerAddressDialog } from './components/CustomerAddressDialog';
 import {
   formatCustomerAddress,
@@ -45,6 +53,7 @@ export default function CustomerDetailPage() {
 
   const [customer, setCustomer] = useState(null);
   const [addresses, setAddresses] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(() => location.state?.message ?? '');
@@ -69,6 +78,30 @@ export default function CustomerDetailPage() {
       })
       .finally(() => {
         if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [businessId, customerId, refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    if (!businessId || !customerId) return undefined;
+
+    searchOrders({
+      businessId,
+      customerId,
+      page: 1,
+      pageSize: 5,
+      sort: 'recent',
+      direction: 'desc',
+    })
+      .then((result) => {
+        if (active) setOrders(result.data);
+      })
+      .catch((loadError) => {
+        if (active) setError(toOrderServiceError(loadError).message);
       });
 
     return () => {
@@ -387,17 +420,67 @@ export default function CustomerDetailPage() {
               <div>
                 <CardTitle>Order history</CardTitle>
                 <CardDescription>
-                  Purchases linked to this customer will appear here.
+                  The most recent purchases linked to this customer.
                 </CardDescription>
               </div>
+              <Link
+                to={`/orders/new?customerId=${customer.id}`}
+                className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+              >
+                New order
+              </Link>
             </CardHeader>
             <CardContent>
-              <EmptyState
-                icon={ShoppingCart}
-                title="No order history yet"
-                description="Order management is the next module. Until then, no order records are created or shown."
-                className="px-4 py-8"
-              />
+              {orders.length === 0 ? (
+                <EmptyState
+                  icon={ShoppingCart}
+                  title="No order history yet"
+                  description="Create an order for this customer and it will appear here."
+                  className="px-4 py-8"
+                />
+              ) : (
+                <ul className="space-y-2">
+                  {orders.map((order) => {
+                    const statusBadge = getOrderStatusBadge(order.status);
+                    return (
+                      <li key={order.id}>
+                        <Link
+                          to={`/orders/${order.id}`}
+                          className="block rounded-lg border border-slate-200 p-3 transition-colors hover:border-brand-200 hover:bg-brand-50/30"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold text-slate-900">
+                                  {order.orderNumber}
+                                </p>
+                                <Badge variant={statusBadge.variant}>
+                                  {statusBadge.label}
+                                </Badge>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {formatDate(order.createdAt)} -{' '}
+                                {order.itemCount} item
+                                {order.itemCount === 1 ? '' : 's'}
+                              </p>
+                              {order.stockState !== 'none' ? (
+                                <p className="mt-1 text-[11px] text-slate-400">
+                                  {getStockStateLabel(order.stockState)}
+                                </p>
+                              ) : null}
+                            </div>
+                            <p className="shrink-0 text-sm font-semibold text-slate-900">
+                              {formatCurrency(order.total, {
+                                currency: order.currency,
+                              })}
+                            </p>
+                          </div>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </CardContent>
           </Card>
         </div>

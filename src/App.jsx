@@ -18,6 +18,12 @@ const WorkspacesPage = lazy(() => import('./features/workspaces/WorkspacesPage')
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
 const InboxPage = lazy(() => import('./features/inbox/InboxPage'));
 const OrdersPage = lazy(() => import('./features/orders/OrdersPage'));
+const OrderEditorPage = lazy(
+  () => import('./features/orders/OrderEditorPage'),
+);
+const OrderDetailPage = lazy(
+  () => import('./features/orders/OrderDetailPage'),
+);
 const ProductsPage = lazy(() => import('./features/products/ProductsPage'));
 const ProductEditorPage = lazy(
   () => import('./features/products/ProductEditorPage'),
@@ -69,6 +75,15 @@ export default function App() {
                   <Route path="overview" element={<DashboardPage />} />
                   <Route path="inbox" element={<InboxPage />} />
                   <Route path="orders" element={<OrdersPage />} />
+                  <Route path="orders/new" element={<OrderEditorPage />} />
+                  <Route
+                    path="orders/:orderId"
+                    element={<OrderDetailPage />}
+                  />
+                  <Route
+                    path="orders/:orderId/edit"
+                    element={<OrderEditorPage />}
+                  />
                   <Route path="products" element={<ProductsPage />} />
                   <Route path="products/new" element={<ProductEditorPage />} />
                   <Route

@@ -273,12 +273,65 @@ export const PAYMENT_STATUS = Object.freeze({
  */
 
 /**
+ * @typedef {'draft'|'awaiting_confirmation'|'confirmed'|'processing'|'ready'|'completed'|'cancelled'} OrderStatus
+ */
+
+/**
+ * @typedef {'none'|'reserved'|'released'|'consumed'} OrderStockState
+ */
+
+/**
  * @typedef {Object} Order
  * @property {string} id
  * @property {string} businessId
- * @property {string} [customerId]
- * @property {string} status
- * @property {string} paymentStatus
+ * @property {string} orderNumber
+ * @property {string} customerId
+ * @property {string} customerName
+ * @property {string|null} customerPhone
+ * @property {string|null} customerEmail
+ * @property {OrderStatus} status
+ * @property {OrderStockState} stockState
+ * @property {string} currency
+ * @property {number} subtotal
  * @property {number} total
- * @property {string} [currency]
+ * @property {string|null} notes
+ * @property {string|null} cancellationReason
+ * @property {number} itemCount
+ * @property {string|null} confirmedAt
+ * @property {string|null} completedAt
+ * @property {string|null} cancelledAt
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ * @property {number} totalCount
+ */
+
+/**
+ * @typedef {Object} OrderItem
+ * @property {string} id
+ * @property {string} businessId
+ * @property {string} orderId
+ * @property {string} productId
+ * @property {string|null} variantId
+ * @property {string} productName
+ * @property {string|null} variantName
+ * @property {string|null} sku
+ * @property {number} unitPrice
+ * @property {number} quantity
+ * @property {number} reservedQuantity
+ * @property {number} lineTotal
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ */
+
+/**
+ * @typedef {Object} OrderEvent
+ * @property {string} id
+ * @property {string} businessId
+ * @property {string} orderId
+ * @property {'created'|'updated'|'status_changed'|'cancelled'} eventType
+ * @property {string} summary
+ * @property {Object} details
+ * @property {string|null} actorId
+ * @property {string} actorName
+ * @property {string} createdAt
  */
