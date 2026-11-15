@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test:auth": "node --env-file=.env.local scripts/day3-auth-tests.mjs",
-    "test:catalogue": "node --env-file=.env.local scripts/day4-catalogue-tests.mjs"
+    "test:catalogue": "node --env-file=.env.local scripts/day4-catalogue-tests.mjs",
+    "test:inventory": "node --env-file=.env.local scripts/day5-inventory-tests.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

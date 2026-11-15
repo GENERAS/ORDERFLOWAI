@@ -315,10 +315,12 @@ try {
     registrationEmail,
     { redirectTo: appResetUrl },
   );
-  if (isEmailRateLimit(resetRequestError)) {
+  if (isEmailRateLimit(resetRequestError) || isInvalidTestEmail(resetRequestError)) {
     skip(
       'live password reset email send',
-      'project email rate limit reached (2/hour); invalid-token and password-update checks still run',
+      isEmailRateLimit(resetRequestError)
+        ? 'project email rate limit reached (2/hour); invalid-token and password-update checks still run'
+        : 'test email domain rejected by the project mailer; invalid-token and password-update checks still run',
     );
   } else {
     check('password reset request succeeds', !resetRequestError, resetRequestError?.message);

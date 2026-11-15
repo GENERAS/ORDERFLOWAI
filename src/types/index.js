@@ -34,6 +34,24 @@ export const PRODUCT_ATTRIBUTE_TYPES = Object.freeze({
   SELECT: 'select',
 });
 
+export const INVENTORY_STATUS = Object.freeze({
+  TRACKED: 'tracked',
+  LOW_STOCK: 'low_stock',
+  OUT_OF_STOCK: 'out_of_stock',
+  UNTRACKED: 'untracked',
+});
+
+export const STOCK_OPERATION = Object.freeze({
+  RECEIVE: 'receive',
+  REDUCE: 'reduce',
+  ADJUSTMENT: 'adjustment',
+  DAMAGE: 'damage',
+  LOSS: 'loss',
+  RETURN: 'return',
+  RESERVE: 'reserve',
+  RELEASE: 'release',
+});
+
 export const ORDER_STATUS = Object.freeze({
   DRAFT: 'draft',
   AWAITING_CONFIRMATION: 'awaiting_confirmation',
@@ -169,6 +187,47 @@ export const PAYMENT_STATUS = Object.freeze({
  * @property {string} [altText]
  * @property {boolean} isPrimary
  * @property {number} sortOrder
+ */
+
+/**
+ * @typedef {'tracked'|'low_stock'|'out_of_stock'|'untracked'} InventoryStatus
+ */
+
+/**
+ * @typedef {'receive'|'reduce'|'adjustment'|'damage'|'loss'|'return'|'reserve'|'release'} StockOperation
+ */
+
+/**
+ * @typedef {Object} InventoryItem
+ * @property {string|null} inventoryItemId
+ * @property {string} businessId
+ * @property {string} productId
+ * @property {string|null} variantId
+ * @property {string} productName
+ * @property {string|null} variantName
+ * @property {string|null} sku
+ * @property {number} physicalQuantity
+ * @property {number} reservedQuantity
+ * @property {number} availableQuantity
+ * @property {number|null} lowStockThreshold
+ * @property {InventoryStatus} inventoryStatus
+ */
+
+/**
+ * @typedef {Object} StockMovement
+ * @property {string} id
+ * @property {string} inventoryItemId
+ * @property {string} productName
+ * @property {string|null} variantName
+ * @property {StockOperation} operation
+ * @property {number} quantityChange
+ * @property {number} previousPhysical
+ * @property {number} newPhysical
+ * @property {number} previousReserved
+ * @property {number} newReserved
+ * @property {string|null} reason
+ * @property {string} performedByName
+ * @property {string} createdAt
  */
 
 /**

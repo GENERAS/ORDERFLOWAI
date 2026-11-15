@@ -4,10 +4,11 @@ AI-powered product discovery and order automation for businesses. OrderFlow AI c
 customer conversations to a business's real product catalogue, order records, inventory and
 payments through a single multi-tenant SaaS workspace.
 
-> **Current status: Day 4 — product catalogue.**
-> The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding, and
-> a real product catalogue with categories, brands, reusable attributes, variants, search,
-> filtering and private product images. Inventory, orders, payments and AI remain later phases.
+> **Current status: Day 5 — inventory management.**
+> The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
+> a real product catalogue, and live inventory with physical, reserved and available stock,
+> immutable stock movements, low-stock alerts and audited stock operations. Orders, payments
+> and AI remain later phases.
 
 ## What is included in this build
 
@@ -30,9 +31,16 @@ payments through a single multi-tenant SaaS workspace.
 - Category, brand and attribute management with role-aware controls.
 - Private product-image uploads with 5 MB limits, signed URLs, alt text and primary-image ordering.
 - Catalogue RPCs for atomic product creation/update, attribute creation and catalogue search.
+- Live inventory balances for tracked products and variants, with generated available quantities.
+- Immutable, append-only stock movements with actor snapshots, reasons and before/after balances.
+- Atomic stock operations for receipts, reductions, adjustments, damage, loss, returns, reservations
+  and releases, with idempotency and concurrency protection.
+- Inventory dashboard with low-stock/out-of-stock filters, overview metrics, tracking controls and
+  paginated movement history.
 - Reusable paginated data-access layer with normalised errors and a retry helper.
 - Shared domain constants and JSDoc types for future features.
-- ESLint configuration, auth/catalogue integration tests and a documented Supabase setup workflow.
+- ESLint configuration, auth/catalogue/inventory integration tests and a documented Supabase setup
+  workflow.
 
 ## Technology stack
 
@@ -97,6 +105,7 @@ data-backed feature will remain unavailable until credentials are added.
 | `npm run lint` | Run ESLint across the project |
 | `npm run test:auth` | Run Day 3 auth, onboarding and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:catalogue` | Run Day 4 catalogue, storage and RLS integration tests (requires `.env.local` and the DB password) |
+| `npm run test:inventory` | Run Day 5 inventory balance, ledger, concurrency and RLS integration tests (requires `.env.local` and the DB password) |
 
 ## Environment variables
 
@@ -149,7 +158,7 @@ src/
     inbox/                    Unified inbox module scaffold
     orders/                   Orders module scaffold
     products/                 Catalogue list, product editor, taxonomy pages, services and helpers
-    inventory/                Inventory module scaffold
+    inventory/                Stock dashboard, item detail, ledger, services and helpers
     customers/                Customers / CRM module scaffold
     payments/                 Payments module scaffold
     reports/                  Reports module scaffold
@@ -163,6 +172,7 @@ src/
   services/
     authService.js            Auth, profile, membership and business RPC calls
     catalogueService.js       Catalogue CRUD, taxonomy, search and product-image storage
+    inventoryService.js       Inventory search, metrics, stock operations and tracking settings
     baseService.js            Paginated data-access layer and retry helper
   types/
     index.js                  Domain constants and JSDoc typedefs
@@ -170,6 +180,7 @@ src/
 scripts/
   day3-auth-tests.mjs         Auth, onboarding and RLS integration tests
   day4-catalogue-tests.mjs    Catalogue, storage and RLS integration tests
+  day5-inventory-tests.mjs    Inventory balance, ledger, concurrency and RLS integration tests
 ```
 
 ### Architectural rules
@@ -190,6 +201,9 @@ scripts/
   the browser never bypasses catalogue invariants.
 - **Soft catalogue lifecycle.** Products are archived instead of hard-deleted, and removed
   variants are kept but marked inactive.
+- **Atomic inventory writes.** Stock balances change only through the validated
+  `record_stock_operation` RPC, which locks the item, enforces reservation rules and appends an
+  immutable ledger row in the same transaction.
 - **Private image storage.** Product images use a private bucket, signed URLs and business-scoped
   storage policies.
 - **Lazy routes.** Pages are code-split via `React.lazy` to keep the initial bundle small.
@@ -217,6 +231,10 @@ scripts/
   are unique per business across products and variants, and product currency must match the business.
 - The `product-images` bucket is private. Upload paths must match the business and product, and
   signed URLs expire after one hour.
+- Inventory balances and stock movements deny direct browser writes. Stock changes require an
+  active membership, pass through security-definer RPCs and are recorded in an immutable ledger.
+- Stock-operation idempotency keys and row locks prevent duplicate movements and concurrent
+  overselling.
 - No fake authentication, fake sessions or fake production data is implemented.
 
 ## Database (Day 2)
@@ -283,6 +301,51 @@ removal, search and filtering, SKU conflicts across tables, currency enforcement
 cross-tenant denial, hard-delete prevention, private uploads, signed URLs, MIME rejection and
 image-path validation. It runs 60 checks against the linked project and cleans up its test users,
 businesses and storage objects.
+
+## Inventory management (Day 5)
+
+Day 5 turns the Inventory placeholder into a real stock module with balances, reservations,
+low-stock alerts and an immutable movement ledger. Full implementation notes and the test matrix
+are in [`docs/day5-inventory.md`](docs/day5-inventory.md).
+
+The schema and RPCs are in
+`supabase/migrations/20261115010000_day5_inventory_management.sql`.
+
+**Inventory routes**
+
+| Route | Purpose |
+| --- | --- |
+| `/inventory` | Stock overview, search/filter/pagination, usage metrics and tracking controls. |
+| `/inventory/items/:inventoryItemId` | Item balances, stock operations, threshold editing and recent movements. |
+| `/inventory/movements` | Immutable stock-movement history with search, operation filter and pagination. |
+
+**Inventory model**
+
+- A product without variants can be tracked at product level. A product with variants is tracked
+  separately for each variant.
+- `available_quantity` is generated as physical minus reserved stock and can never go below zero.
+- Receipts, returns and reservations increase stock; reductions, damage, loss and releases reduce
+  stock. Adjustments can move either direction and require a reason.
+- Reserving stock changes only the reserved balance. Physical operations cannot consume reserved
+  units, and reservations cannot exceed available stock.
+- Every successful operation appends an immutable movement row with the actor, reason, signed
+  change and previous/new physical and reserved balances.
+- Tracking can be disabled only when physical and reserved stock are both zero. Empty unused
+  records are removed; records with history remain as untracked so the ledger stays intact.
+- Movement idempotency keys and row locks prevent duplicate submissions and concurrent overselling.
+
+**Inventory tests**
+
+```powershell
+. .\scripts\load-supabase-db-password.ps1
+npm run test:inventory
+```
+
+The suite exercises overview metrics, search/status/category filters, pagination and sorting,
+every stock operation, reservation limits, low/out-of-stock transitions, role permissions,
+cross-tenant RLS, direct-write denial, product/variant tracking scope, idempotency, concurrent
+duplicates, concurrent reservation safety, tracking disable/re-enable behaviour and cleanup.
+It runs 96 checks against the linked project and cleans up its test users and businesses.
 
 ## Authentication and onboarding (Day 3)
 
@@ -370,9 +433,9 @@ but this is an engineering direction, not a claim about current free-tier capaci
 
 ## Intentionally not built yet
 
-The following are scheduled for later phases and deliberately excluded from Days 1–4:
+The following are scheduled for later phases and deliberately excluded from Days 1–5:
 
-- Inventory quantities, stock movements and purchasing.
+- Purchase orders, suppliers and automated replenishment.
 - Customer, order and payment workflows.
 - AI product discovery and AI order extraction.
 - WhatsApp, Instagram or Facebook integrations.
@@ -443,6 +506,22 @@ The following are scheduled for later phases and deliberately excluded from Days
 - [x] Day 4 catalogue/storage/RLS integration tests pass.
 - [x] Day 2 RLS isolation, Day 3 auth tests, lint and production build still pass.
 - [x] Day 4 migration applied to the linked Supabase project.
+
+## Day 5 acceptance checklist
+
+- [x] Inventory tables, generated available quantities, constraints and indexes defined.
+- [x] Immutable stock-movement ledger and movement-history indexes.
+- [x] Row Level Security, read-only direct access and role matrix enforced.
+- [x] Atomic stock-operation RPC with row locking, reservation rules and idempotency.
+- [x] Product-level and variant-level tracking scope enforced.
+- [x] Stock receipts, reductions, adjustments, damage, loss, returns, reservations and releases.
+- [x] Low-stock/out-of-stock calculations and server-side inventory search.
+- [x] Inventory overview metrics and paginated movement history.
+- [x] Inventory dashboard, item detail, stock-operation flow and role-aware tracking controls.
+- [x] Tracking disable/re-enable behaviour preserves the movement ledger.
+- [x] Day 5 inventory/concurrency/RLS integration tests pass.
+- [x] Day 2 RLS isolation, Day 3 auth, Day 4 catalogue, lint and production build still pass.
+- [x] Day 5 migration applied to the linked Supabase project.
 
 ## License
 
