@@ -4,10 +4,10 @@ AI-powered product discovery and order automation for businesses. OrderFlow AI c
 customer conversations to a business's real product catalogue, order records, inventory and
 payments through a single multi-tenant SaaS workspace.
 
-> **Current status: Day 5 — inventory management.**
+> **Current status: Day 6 — customer management.**
 > The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
-> a real product catalogue, and live inventory with physical, reserved and available stock,
-> immutable stock movements, low-stock alerts and audited stock operations. Orders, payments
+> a real product catalogue, live inventory with physical, reserved and available stock, and
+> customer profiles with contact details, addresses and duplicate detection. Orders, payments
 > and AI remain later phases.
 
 ## What is included in this build
@@ -37,10 +37,16 @@ payments through a single multi-tenant SaaS workspace.
   and releases, with idempotency and concurrency protection.
 - Inventory dashboard with low-stock/out-of-stock filters, overview metrics, tracking controls and
   paginated movement history.
+- Customer profiles with normalised email/phone contacts, company names and internal notes.
+- Customer address book with labels, recipient details, default-address handling and business-country
+  defaults.
+- Server-side customer search across name, company, email, phone and address, plus duplicate detection
+  before saving.
+- Customer list, create/edit forms, customer detail, address dialog and an order-history placeholder.
 - Reusable paginated data-access layer with normalised errors and a retry helper.
 - Shared domain constants and JSDoc types for future features.
-- ESLint configuration, auth/catalogue/inventory integration tests and a documented Supabase setup
-  workflow.
+- ESLint configuration, auth/catalogue/inventory/customer integration tests and a documented
+  Supabase setup workflow.
 
 ## Technology stack
 
@@ -106,6 +112,7 @@ data-backed feature will remain unavailable until credentials are added.
 | `npm run test:auth` | Run Day 3 auth, onboarding and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:catalogue` | Run Day 4 catalogue, storage and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:inventory` | Run Day 5 inventory balance, ledger, concurrency and RLS integration tests (requires `.env.local` and the DB password) |
+| `npm run test:customers` | Run Day 6 customer profile, duplicate, address and RLS integration tests (requires `.env.local` and the DB password) |
 
 ## Environment variables
 
@@ -159,7 +166,7 @@ src/
     orders/                   Orders module scaffold
     products/                 Catalogue list, product editor, taxonomy pages, services and helpers
     inventory/                Stock dashboard, item detail, ledger, services and helpers
-    customers/                Customers / CRM module scaffold
+    customers/                Customer list, profile editor, detail, addresses and helpers
     payments/                 Payments module scaffold
     reports/                  Reports module scaffold
     team/                     Team and permissions module scaffold
@@ -173,6 +180,7 @@ src/
     authService.js            Auth, profile, membership and business RPC calls
     catalogueService.js       Catalogue CRUD, taxonomy, search and product-image storage
     inventoryService.js       Inventory search, metrics, stock operations and tracking settings
+    customerService.js        Customer search, profiles, duplicate detection and addresses
     baseService.js            Paginated data-access layer and retry helper
   types/
     index.js                  Domain constants and JSDoc typedefs
@@ -181,6 +189,7 @@ scripts/
   day3-auth-tests.mjs         Auth, onboarding and RLS integration tests
   day4-catalogue-tests.mjs    Catalogue, storage and RLS integration tests
   day5-inventory-tests.mjs    Inventory balance, ledger, concurrency and RLS integration tests
+  day6-customer-tests.mjs     Customer profile, duplicate, address and RLS integration tests
 ```
 
 ### Architectural rules
@@ -204,6 +213,8 @@ scripts/
 - **Atomic inventory writes.** Stock balances change only through the validated
   `record_stock_operation` RPC, which locks the item, enforces reservation rules and appends an
   immutable ledger row in the same transaction.
+- **Atomic customer writes.** Customer profiles and addresses are created or changed only through
+  validated security-definer RPCs; the browser has select-only table access.
 - **Private image storage.** Product images use a private bucket, signed URLs and business-scoped
   storage policies.
 - **Lazy routes.** Pages are code-split via `React.lazy` to keep the initial bundle small.
@@ -235,6 +246,9 @@ scripts/
   active membership, pass through security-definer RPCs and are recorded in an immutable ledger.
 - Stock-operation idempotency keys and row locks prevent duplicate movements and concurrent
   overselling.
+- Customer tables grant select-only access to active members. Profile and address writes go through
+  security-definer RPCs, and email/phone uniqueness is scoped per business.
+- Customer duplicate detection never reads outside the selected business.
 - No fake authentication, fake sessions or fake production data is implemented.
 
 ## Database (Day 2)
@@ -347,6 +361,56 @@ cross-tenant RLS, direct-write denial, product/variant tracking scope, idempoten
 duplicates, concurrent reservation safety, tracking disable/re-enable behaviour and cleanup.
 It runs 96 checks against the linked project and cleans up its test users and businesses.
 
+## Customer management (Day 6)
+
+Day 6 turns the Customers placeholder into a real customer module with profiles, contact details,
+addresses and duplicate detection. Full implementation notes and the test matrix are in
+[`docs/day6-customers.md`](docs/day6-customers.md).
+
+The schema and RPCs are in `supabase/migrations/20261116010000_day6_customer_management.sql`.
+
+**Customer routes**
+
+| Route | Purpose |
+| --- | --- |
+| `/customers` | Searchable, sortable, paginated customer list. |
+| `/customers/new` | Create a customer with validated contact details. |
+| `/customers/:customerId` | Contact details, addresses, notes and order-history placeholder. |
+| `/customers/:customerId/edit` | Edit the customer profile. |
+
+**Customer model**
+
+- Customers require at least one email address or phone number.
+- Emails are normalised to lowercase. Rwanda phone numbers are normalised to `250...` so local and
+  international formats match.
+- Exact email and phone duplicates are blocked per business. A matching name without matching contact
+  details is a warning, not a block.
+- Customers can have multiple labelled addresses, with exactly one default address. Deleting the
+  default promotes the earliest remaining address.
+- Addresses inherit the business country unless a valid two-letter country code is supplied.
+- Customer search covers name, company, email, phone and address text.
+- Customer order history is deliberately a placeholder until the orders module exists.
+
+**Roles and RPCs**
+
+- All four active roles can create and edit customers and addresses.
+- Table access is select-only for active members; direct insert/update/delete is denied.
+- Writes require authentication and active membership through `create_customer`, `update_customer`,
+  `save_customer_address` and `delete_customer_address`.
+- Duplicate detection uses `find_customer_duplicates`; listing and lookup use `search_customers`.
+
+**Customer tests**
+
+```powershell
+. .\scripts\load-supabase-db-password.ps1
+npm run test:customers
+```
+
+The suite exercises profile validation, email/phone normalisation, duplicate blocking and warnings,
+search/sort/pagination, address defaults and promotion, role permissions, direct-write denial,
+cross-tenant RLS, duplicate-detection isolation and cleanup. It runs 136 checks against the linked
+project and cleans up its test users, businesses and customer records.
+
 ## Authentication and onboarding (Day 3)
 
 Day 3 adds a complete auth and workspace-entry flow. Full implementation notes and the test
@@ -428,15 +492,16 @@ but this is an engineering direction, not a claim about current free-tier capaci
    including `/auth/callback` and `/reset-password`.
 5. Deploy and verify client-side routing and email confirmation links.
 
-`BrowserRouter` requires a rewrite so unknown paths serve `index.html`. On Vercel, add a
-`vercel.json` rewrite when deployment starts (not required for local development).
+`BrowserRouter` requires a rewrite so unknown paths serve `index.html`. `vercel.json` provides the
+catch-all rewrite, so direct links such as `/login` and `/customers` load the app instead of a
+Vercel 404.
 
 ## Intentionally not built yet
 
-The following are scheduled for later phases and deliberately excluded from Days 1–5:
+The following are scheduled for later phases and deliberately excluded from Days 1–6:
 
 - Purchase orders, suppliers and automated replenishment.
-- Customer, order and payment workflows.
+- Order and payment workflows, including real customer order history.
 - AI product discovery and AI order extraction.
 - WhatsApp, Instagram or Facebook integrations.
 - Visual/image product search.
@@ -522,6 +587,25 @@ The following are scheduled for later phases and deliberately excluded from Days
 - [x] Day 5 inventory/concurrency/RLS integration tests pass.
 - [x] Day 2 RLS isolation, Day 3 auth, Day 4 catalogue, lint and production build still pass.
 - [x] Day 5 migration applied to the linked Supabase project.
+
+## Day 6 acceptance checklist
+
+- [x] Customer tables, contact constraints, normalised phone storage and indexes defined.
+- [x] Row Level Security and active-membership access enforced.
+- [x] Select-only table grants; customer and address writes require security-definer RPCs.
+- [x] Atomic create/update customer RPCs with validated email, phone and contact requirements.
+- [x] Per-business email and phone uniqueness with friendly duplicate errors.
+- [x] Duplicate detection for email, phone and name, excluding the edited customer and other businesses.
+- [x] Address create/update/delete RPCs with one default per customer and promotion on delete.
+- [x] Address country defaults to the business country and validates ISO two-letter codes.
+- [x] Server-side customer search across name, company, email, phone and address.
+- [x] Pagination, sorting and full filtered totals.
+- [x] Customer list, create/edit form, detail page and address dialog implemented.
+- [x] Order history remains an honest placeholder until the orders module is built.
+- [x] Day 6 customer/profile/address/RLS integration tests pass.
+- [x] Day 2 RLS isolation, Day 3 auth, Day 4 catalogue, Day 5 inventory, lint and production build
+  still pass.
+- [x] Day 6 migration applied to the linked Supabase project.
 
 ## License
 

@@ -231,6 +231,48 @@ export const PAYMENT_STATUS = Object.freeze({
  */
 
 /**
+ * @typedef {Object} CustomerAddress
+ * @property {string} id
+ * @property {string} businessId
+ * @property {string} customerId
+ * @property {string|null} label
+ * @property {string|null} recipientName
+ * @property {string} line1
+ * @property {string|null} line2
+ * @property {string|null} city
+ * @property {string|null} region
+ * @property {string|null} postalCode
+ * @property {string} country
+ * @property {boolean} isDefault
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ */
+
+/**
+ * @typedef {Object} CustomerPrimaryAddress
+ * @property {string|null} label
+ * @property {string} line1
+ * @property {string|null} city
+ * @property {string|null} country
+ */
+
+/**
+ * @typedef {Object} Customer
+ * @property {string} id
+ * @property {string} businessId
+ * @property {string} fullName
+ * @property {string|null} companyName
+ * @property {string|null} email
+ * @property {string|null} phone
+ * @property {string|null} notes
+ * @property {number} addressCount
+ * @property {CustomerPrimaryAddress|null} primaryAddress
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ * @property {number} totalCount
+ */
+
+/**
  * @typedef {Object} Order
  * @property {string} id
  * @property {string} businessId

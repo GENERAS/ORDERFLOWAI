@@ -33,6 +33,12 @@ const StockMovementsPage = lazy(
   () => import('./features/inventory/StockMovementsPage'),
 );
 const CustomersPage = lazy(() => import('./features/customers/CustomersPage'));
+const CustomerEditorPage = lazy(
+  () => import('./features/customers/CustomerEditorPage'),
+);
+const CustomerDetailPage = lazy(
+  () => import('./features/customers/CustomerDetailPage'),
+);
 const PaymentsPage = lazy(() => import('./features/payments/PaymentsPage'));
 const ReportsPage = lazy(() => import('./features/reports/ReportsPage'));
 const TeamPage = lazy(() => import('./features/team/TeamPage'));
@@ -88,6 +94,18 @@ export default function App() {
                     element={<InventoryItemPage />}
                   />
                   <Route path="customers" element={<CustomersPage />} />
+                  <Route
+                    path="customers/new"
+                    element={<CustomerEditorPage />}
+                  />
+                  <Route
+                    path="customers/:customerId"
+                    element={<CustomerDetailPage />}
+                  />
+                  <Route
+                    path="customers/:customerId/edit"
+                    element={<CustomerEditorPage />}
+                  />
                   <Route path="payments" element={<PaymentsPage />} />
                   <Route path="reports" element={<ReportsPage />} />
                   <Route path="team" element={<TeamPage />} />
