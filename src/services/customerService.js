@@ -24,6 +24,27 @@ const ADDRESS_COLUMNS = `
   updated_at
 `;
 
+const NOTE_COLUMNS = `
+  id,
+  business_id,
+  customer_id,
+  body,
+  author_name,
+  created_by,
+  created_at
+`;
+
+const EVENT_COLUMNS = `
+  id,
+  business_id,
+  customer_id,
+  event_type,
+  description,
+  actor_id,
+  actor_name,
+  created_at
+`;
+
 export class CustomerServiceError extends Error {
   constructor(message, { cause, code, details, hint } = {}) {
     super(message, { cause });
@@ -111,6 +132,8 @@ export function mapCustomer(row) {
     email: row.email ?? null,
     phone: row.phone ?? null,
     notes: row.notes ?? null,
+    status: row.status ?? 'active',
+    tags: row.tags ?? [],
     addressCount,
     primaryAddress: hasPrimaryAddress
       ? {
@@ -146,6 +169,33 @@ export function mapCustomerAddress(row) {
   };
 }
 
+export function mapCustomerNote(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    customerId: row.customer_id,
+    body: row.body,
+    authorName: row.author_name,
+    createdBy: row.created_by ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapCustomerEvent(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    customerId: row.customer_id,
+    eventType: row.event_type,
+    description: row.description,
+    actorId: row.actor_id ?? null,
+    actorName: row.actor_name,
+    createdAt: row.created_at,
+  };
+}
+
 function mapDuplicate(row) {
   if (!row) return null;
   return {
@@ -166,6 +216,8 @@ export async function searchCustomers({
   pageSize = DEFAULT_PAGE_SIZE,
   sort = 'name',
   direction = 'asc',
+  status = null,
+  tag = null,
 } = {}) {
   const supabase = getClient();
   const safePage = Math.max(1, Math.floor(Number(page) || 1));
@@ -180,6 +232,8 @@ export async function searchCustomers({
     p_offset: offset,
     p_sort: sort,
     p_direction: direction,
+    p_status: status || null,
+    p_tag: tag || null,
   });
 
   if (error) throw toCustomerServiceError(error);
@@ -210,6 +264,32 @@ async function loadCustomerAddresses({ businessId, customerId }) {
   return (data ?? []).map(mapCustomerAddress);
 }
 
+async function loadCustomerNotes({ businessId, customerId }) {
+  const supabase = getClient();
+  const { data, error } = await supabase
+    .from('customer_notes')
+    .select(NOTE_COLUMNS)
+    .eq('business_id', businessId)
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw toCustomerServiceError(error);
+  return (data ?? []).map(mapCustomerNote);
+}
+
+async function loadCustomerEvents({ businessId, customerId }) {
+  const supabase = getClient();
+  const { data, error } = await supabase
+    .from('customer_events')
+    .select(EVENT_COLUMNS)
+    .eq('business_id', businessId)
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw toCustomerServiceError(error);
+  return (data ?? []).map(mapCustomerEvent);
+}
+
 export async function getCustomer({ businessId, customerId }) {
   const result = await searchCustomers({
     businessId,
@@ -219,10 +299,16 @@ export async function getCustomer({ businessId, customerId }) {
   });
 
   const customer = result.data[0] ?? null;
-  if (!customer) return { customer: null, addresses: [] };
+  if (!customer) {
+    return { customer: null, addresses: [], notes: [], events: [] };
+  }
 
-  const addresses = await loadCustomerAddresses({ businessId, customerId });
-  return { customer, addresses };
+  const [addresses, notes, events] = await Promise.all([
+    loadCustomerAddresses({ businessId, customerId }),
+    loadCustomerNotes({ businessId, customerId }),
+    loadCustomerEvents({ businessId, customerId }),
+  ]);
+  return { customer, addresses, notes, events };
 }
 
 export async function findCustomerDuplicates({
@@ -249,6 +335,32 @@ export async function findCustomerDuplicates({
   return (data ?? []).map(mapDuplicate);
 }
 
+export async function listCustomerTags(businessId) {
+  if (!businessId) return [];
+
+  const supabase = getClient();
+  const { data, error } = await supabase.rpc('list_customer_tags', {
+    p_business_id: businessId,
+  });
+
+  if (error) throw toCustomerServiceError(error);
+  return (data ?? []).map((row) => ({
+    tag: row.tag,
+    customerCount: Number(row.customer_count ?? 0),
+  }));
+}
+
+export async function addCustomerNote({ customerId, body }) {
+  const supabase = getClient();
+  const { data, error } = await supabase.rpc('add_customer_note', {
+    p_customer_id: customerId,
+    p_body: body,
+  });
+
+  if (error) throw toCustomerServiceError(error);
+  return mapCustomerNote(unwrapRpc(data));
+}
+
 export async function createCustomer({
   businessId,
   fullName,
@@ -256,6 +368,10 @@ export async function createCustomer({
   phone = '',
   companyName = '',
   notes = '',
+  status = 'active',
+  tags = [],
+  duplicateOverride = false,
+  duplicateReason = '',
 }) {
   const supabase = getClient();
   const { data, error } = await supabase.rpc('create_customer', {
@@ -265,6 +381,10 @@ export async function createCustomer({
     p_phone: String(phone ?? '').trim() || null,
     p_company_name: String(companyName ?? '').trim() || null,
     p_notes: String(notes ?? '').trim() || null,
+    p_status: status || 'active',
+    p_tags: tags ?? [],
+    p_duplicate_override: Boolean(duplicateOverride),
+    p_duplicate_reason: String(duplicateReason ?? '').trim() || null,
   });
 
   if (error) throw toCustomerServiceError(error);
@@ -277,7 +397,11 @@ export async function updateCustomer({
   email = '',
   phone = '',
   companyName = '',
-  notes = '',
+  notes = null,
+  status = null,
+  tags = null,
+  duplicateOverride = false,
+  duplicateReason = '',
 }) {
   const supabase = getClient();
   const { data, error } = await supabase.rpc('update_customer', {
@@ -287,6 +411,10 @@ export async function updateCustomer({
     p_phone: String(phone ?? '').trim() || null,
     p_company_name: String(companyName ?? '').trim() || null,
     p_notes: String(notes ?? '').trim() || null,
+    p_status: status || null,
+    p_tags: Array.isArray(tags) ? tags : null,
+    p_duplicate_override: Boolean(duplicateOverride),
+    p_duplicate_reason: String(duplicateReason ?? '').trim() || null,
   });
 
   if (error) throw toCustomerServiceError(error);

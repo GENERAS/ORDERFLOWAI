@@ -181,6 +181,10 @@ async function createCustomer(client, businessId, payload) {
     p_phone: payload.phone ?? null,
     p_company_name: payload.companyName ?? null,
     p_notes: payload.notes ?? null,
+    p_status: payload.status ?? 'active',
+    p_tags: payload.tags ?? null,
+    p_duplicate_override: payload.duplicateOverride ?? false,
+    p_duplicate_reason: payload.duplicateReason ?? null,
   });
   return { customer: unwrapRpc(data), error };
 }
@@ -193,6 +197,10 @@ async function updateCustomer(client, customerId, payload) {
     p_phone: payload.phone ?? null,
     p_company_name: payload.companyName ?? null,
     p_notes: payload.notes ?? null,
+    p_status: payload.status ?? null,
+    p_tags: payload.tags ?? null,
+    p_duplicate_override: payload.duplicateOverride ?? false,
+    p_duplicate_reason: payload.duplicateReason ?? null,
   });
   return { customer: unwrapRpc(data), error };
 }
@@ -206,6 +214,8 @@ async function searchCustomers(client, businessId, options = {}) {
     p_offset: options.offset ?? 0,
     p_sort: options.sort ?? 'name',
     p_direction: options.direction ?? 'asc',
+    p_status: options.status ?? null,
+    p_tag: options.tag ?? null,
   });
   return { rows: data ?? [], error };
 }
@@ -243,6 +253,43 @@ async function deleteAddress(client, addressId) {
     p_address_id: addressId,
   });
   return { deleted: data, error };
+}
+
+async function listCustomerTags(client, businessId) {
+  const { data, error } = await client.rpc('list_customer_tags', {
+    p_business_id: businessId,
+  });
+  return { rows: data ?? [], error };
+}
+
+async function addCustomerNote(client, customerId, body) {
+  const { data, error } = await client.rpc('add_customer_note', {
+    p_customer_id: customerId,
+    p_body: body,
+  });
+  return { note: unwrapRpc(data), error };
+}
+
+async function noteRows(customerId) {
+  const result = await db.query(
+    `select id, body, author_name, created_by
+     from public.customer_notes
+     where customer_id = $1
+     order by created_at, id`,
+    [customerId],
+  );
+  return result.rows;
+}
+
+async function eventRows(customerId) {
+  const result = await db.query(
+    `select id, event_type, description, actor_id, actor_name
+     from public.customer_events
+     where customer_id = $1
+     order by created_at, id`,
+    [customerId],
+  );
+  return result.rows;
 }
 
 async function addressRows(customerId) {
@@ -651,6 +698,215 @@ try {
     '42501',
   );
 
+  const taggedResult = await createCustomer(staff.client, businessA, {
+    fullName: 'Tagged Customer',
+    email: `tagged-${runId}@example.com`,
+    status: 'inactive',
+    tags: ['VIP', ' wholesale ', 'vip', ''],
+  });
+  check('staff can create a customer with status and tags', !taggedResult.error, taggedResult.error?.message);
+  const tagged = taggedResult.customer;
+  checkEqual('customer status is stored', tagged?.status, 'inactive');
+  checkEqual(
+    'customer tags are trimmed, lowercased and deduplicated',
+    JSON.stringify(tagged?.tags),
+    JSON.stringify(['vip', 'wholesale']),
+  );
+
+  const invalidStatus = await createCustomer(owner.client, businessA, {
+    fullName: 'Invalid Status',
+    email: `invalid-status-${runId}@example.com`,
+    status: 'paused',
+  });
+  checkRpcError('unsupported customer status is rejected', invalidStatus, '22023');
+
+  const longTag = await createCustomer(owner.client, businessA, {
+    fullName: 'Long Tag',
+    email: `long-tag-${runId}@example.com`,
+    tags: ['x'.repeat(41)],
+  });
+  checkRpcError('customer tags are limited to 40 characters', longTag, '22023');
+
+  const tooManyTags = await createCustomer(owner.client, businessA, {
+    fullName: 'Too Many Tags',
+    email: `too-many-tags-${runId}@example.com`,
+    tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`),
+  });
+  checkRpcError('customers are limited to 20 tags', tooManyTags, '22023');
+
+  const inactiveSearch = await searchCustomers(owner.client, businessA, {
+    status: 'inactive',
+  });
+  checkEqual('customer search filters by status', inactiveSearch.rows.length, 1);
+  checkEqual('status filter returns the right customer', inactiveSearch.rows[0]?.id, tagged.id);
+
+  const tagSearch = await searchCustomers(owner.client, businessA, {
+    tag: 'VIP',
+  });
+  checkEqual('customer search filters by tag case-insensitively', tagSearch.rows.length, 1);
+  checkEqual('tag filter returns the right customer', tagSearch.rows[0]?.id, tagged.id);
+
+  const tagTextSearch = await searchCustomers(owner.client, businessA, {
+    search: 'wholesale',
+  });
+  checkEqual('customer search matches a tag as text', tagTextSearch.rows.length, 1);
+
+  const invalidStatusSearch = await searchCustomers(owner.client, businessA, {
+    status: 'paused',
+  });
+  checkRpcError('unsupported customer status filter is rejected', invalidStatusSearch, '22023');
+
+  const tagList = await listCustomerTags(owner.client, businessA);
+  check('customers can list workspace tags', !tagList.error, tagList.error?.message);
+  checkEqual('tag list includes the wholesale tag', tagList.rows.length, 2);
+  check(
+    'tag list counts customers per tag',
+    tagList.rows.every((row) => row.customer_count === 1),
+  );
+  checkEqual('tag list is sorted alphabetically', tagList.rows[0]?.tag, 'vip');
+
+  const staffTagList = await listCustomerTags(staff.client, businessA);
+  check('staff can list workspace tags', !staffTagList.error, staffTagList.error?.message);
+
+  const crossBusinessTagList = await listCustomerTags(secondOwner.client, businessA);
+  checkRpcError(
+    'non-members cannot list another business tags',
+    crossBusinessTagList,
+    '42501',
+  );
+
+  const anonTagList = await listCustomerTags(anon, businessA);
+  checkRpcError('unauthenticated users cannot list customer tags', anonTagList, '42501');
+
+  const taggedUpdate = await updateCustomer(staff.client, tagged.id, {
+    fullName: 'Tagged Customer',
+    email: tagged.email,
+    status: 'active',
+    tags: ['Priority', 'VIP'],
+  });
+  check('staff can update customer status and tags', !taggedUpdate.error, taggedUpdate.error?.message);
+  checkEqual('customer status updates are saved', taggedUpdate.customer?.status, 'active');
+  checkEqual(
+    'customer tag updates are normalised',
+    JSON.stringify(taggedUpdate.customer?.tags),
+    JSON.stringify(['priority', 'vip']),
+  );
+
+  const preserveFieldsUpdate = await updateCustomer(staff.client, tagged.id, {
+    fullName: 'Tagged Customer',
+    email: tagged.email,
+  });
+  check('omitted status and tags preserve existing values', !preserveFieldsUpdate.error, preserveFieldsUpdate.error?.message);
+  checkEqual('omitted status is preserved', preserveFieldsUpdate.customer?.status, 'active');
+  checkEqual(
+    'omitted tags are preserved',
+    JSON.stringify(preserveFieldsUpdate.customer?.tags),
+    JSON.stringify(['priority', 'vip']),
+  );
+
+  const emptyTagSearch = await searchCustomers(owner.client, businessA, {
+    tag: 'wholesale',
+  });
+  checkEqual('removed tags no longer match', emptyTagSearch.rows.length, 0);
+
+  const staffOverride = await createCustomer(staff.client, businessA, {
+    fullName: 'Staff Override',
+    email: aliceEmail,
+    duplicateOverride: true,
+    duplicateReason: 'Staff attempted to override.',
+  });
+  checkRpcError('staff cannot override duplicate contact details', staffOverride, '42501');
+
+  const shortOverrideReason = await createCustomer(manager.client, businessA, {
+    fullName: 'Short Override Reason',
+    email: aliceEmail,
+    duplicateOverride: true,
+    duplicateReason: 'x',
+  });
+  checkRpcError('duplicate override requires a valid reason', shortOverrideReason, '22023');
+
+  const overrideResult = await createCustomer(manager.client, businessA, {
+    fullName: 'Alice Override',
+    email: aliceEmail,
+    status: 'active',
+    tags: ['vip'],
+    duplicateOverride: true,
+    duplicateReason: 'Separate billing profile for the same owner.',
+  });
+  check('managers can override duplicate contact details', !overrideResult.error, overrideResult.error?.message);
+  const overrideCustomer = overrideResult.customer;
+  checkEqual('duplicate override keeps the shared email', overrideCustomer?.email, aliceEmail);
+
+  const overrideEvents = await eventRows(overrideCustomer.id);
+  check(
+    'duplicate overrides are recorded in the activity timeline',
+    overrideEvents.some((row) => row.event_type === 'duplicate_override'),
+  );
+  check(
+    'duplicate override events include the reason',
+    overrideEvents.some(
+      (row) =>
+        row.event_type === 'duplicate_override' &&
+        row.description.includes('Separate billing profile'),
+    ),
+  );
+
+  const restoreOverride = await updateCustomer(manager.client, overrideCustomer.id, {
+    fullName: 'Alice Override',
+    email: `alice-override-${runId}@example.com`,
+  });
+  check('the created duplicate override can be reverted', !restoreOverride.error, restoreOverride.error?.message);
+
+  const updateOverride = await updateCustomer(manager.client, tagged.id, {
+    fullName: 'Tagged Customer',
+    email: aliceEmail,
+    duplicateOverride: true,
+    duplicateReason: 'Merging contact details after verification.',
+  });
+  check('managers can override duplicates on update', !updateOverride.error, updateOverride.error?.message);
+  const updateOverrideEvents = await eventRows(tagged.id);
+  check(
+    'duplicate overrides on update are recorded',
+    updateOverrideEvents.some((row) => row.event_type === 'duplicate_override'),
+  );
+
+  const restoreTagged = await updateCustomer(manager.client, tagged.id, {
+    fullName: 'Tagged Customer',
+    email: tagged.email,
+  });
+  check('the duplicate override can be reverted', !restoreTagged.error, restoreTagged.error?.message);
+  checkEqual('reverting restores the unique email', restoreTagged.customer?.email, tagged.email);
+
+  const anonNoteRead = await anon
+    .from('customer_notes')
+    .select('id')
+    .eq('customer_id', alice.id);
+  check('unauthenticated users cannot read customer notes', Boolean(anonNoteRead.error));
+
+  const anonEventRead = await anon
+    .from('customer_events')
+    .select('id')
+    .eq('customer_id', alice.id);
+  check('unauthenticated users cannot read customer activity', Boolean(anonEventRead.error));
+
+  const directNoteInsert = await owner.client.from('customer_notes').insert({
+    business_id: businessA,
+    customer_id: alice.id,
+    body: 'Direct note insert',
+    author_name: 'Owner',
+  });
+  check('authenticated clients cannot insert notes directly', Boolean(directNoteInsert.error));
+  checkEqual('direct note insert is denied', directNoteInsert.error?.code, '42501');
+
+  const directEventInsert = await owner.client.from('customer_events').insert({
+    business_id: businessA,
+    customer_id: alice.id,
+    event_type: 'note_added',
+    description: 'Direct event insert',
+  });
+  check('authenticated clients cannot insert activity directly', Boolean(directEventInsert.error));
+  checkEqual('direct activity insert is denied', directEventInsert.error?.code, '42501');
+
   const aliceUpdate = await updateCustomer(owner.client, alice.id, {
     fullName: 'Alice Test',
     email: `ALICE-${runId}@EXAMPLE.COM`,
@@ -669,6 +925,109 @@ try {
     aliceUpdate.customer?.updated_by,
     ownerId,
   );
+
+  const aliceNotesBefore = await noteRows(alice.id);
+  checkEqual('customer updates with notes append to note history', aliceNotesBefore.length, 2);
+  check(
+    'existing notes are retained when a new note is added',
+    aliceNotesBefore.some((row) => row.body === 'Prefers delivery in the afternoon.'),
+  );
+
+  const staffNote = await addCustomerNote(
+    staff.client,
+    alice.id,
+    'Staff called to confirm the new delivery window.',
+  );
+  check('staff can add a customer note', !staffNote.error, staffNote.error?.message);
+  checkEqual('note author is recorded', staffNote.note?.author_name, 'Day Six Staff');
+
+  const aliceNotesAfter = await noteRows(alice.id);
+  checkEqual('customer notes are append-only', aliceNotesAfter.length, 3);
+  check(
+    'the new note appears in history',
+    aliceNotesAfter.some((row) => row.body.includes('Staff called')),
+  );
+
+  const blankNote = await addCustomerNote(owner.client, alice.id, '   ');
+  checkRpcError('blank customer notes are rejected', blankNote, '22023');
+
+  const longNote = await addCustomerNote(owner.client, alice.id, 'x'.repeat(2001));
+  checkRpcError('customer notes are limited to 2000 characters', longNote, '22023');
+
+  const crossBusinessNote = await addCustomerNote(
+    secondOwner.client,
+    alice.id,
+    'Cross business note',
+  );
+  checkRpcError(
+    'non-members cannot add notes to another business customer',
+    crossBusinessNote,
+    '42501',
+  );
+
+  const intruderNote = await addCustomerNote(intruder.client, alice.id, 'Intruder note');
+  checkRpcError('non-members cannot add customer notes', intruderNote, '42501');
+
+  const missingCustomerNote = await addCustomerNote(owner.client, randomUUID(), 'Missing');
+  checkRpcError('notes cannot be added to a missing customer', missingCustomerNote, '42501');
+
+  const aliceEvents = await eventRows(alice.id);
+  check(
+    'customer creation is recorded in the activity timeline',
+    aliceEvents.some((row) => row.event_type === 'customer_created'),
+  );
+  check(
+    'customer notes are recorded in the activity timeline',
+    aliceEvents.some((row) => row.event_type === 'note_added'),
+  );
+  check(
+    'customer profile updates are recorded in the activity timeline',
+    aliceEvents.some((row) => row.event_type === 'customer_updated'),
+  );
+
+  const taggedEvents = await eventRows(tagged.id);
+  check(
+    'status changes are recorded in the activity timeline',
+    taggedEvents.some((row) => row.event_type === 'status_changed'),
+  );
+  check(
+    'tag changes are recorded in the activity timeline',
+    taggedEvents.some((row) => row.event_type === 'tags_updated'),
+  );
+
+  const crossBusinessNoteRead = await secondOwner.client
+    .from('customer_notes')
+    .select('id')
+    .eq('customer_id', alice.id);
+  checkEqual(
+    'row-level security hides another business notes',
+    crossBusinessNoteRead.data?.length,
+    0,
+  );
+
+  const intruderEventRead = await intruder.client
+    .from('customer_events')
+    .select('id')
+    .eq('customer_id', alice.id);
+  checkEqual(
+    'non-members cannot read customer activity',
+    intruderEventRead.data?.length,
+    0,
+  );
+
+  const directNoteUpdate = await owner.client
+    .from('customer_notes')
+    .update({ body: 'Changed' })
+    .eq('customer_id', alice.id);
+  check('authenticated clients cannot update notes directly', Boolean(directNoteUpdate.error));
+  checkEqual('direct note update is denied', directNoteUpdate.error?.code, '42501');
+
+  const directNoteDelete = await owner.client
+    .from('customer_notes')
+    .delete()
+    .eq('customer_id', alice.id);
+  check('authenticated clients cannot delete notes directly', Boolean(directNoteDelete.error));
+  checkEqual('direct note delete is denied', directNoteDelete.error?.code, '42501');
 
   const staffUpdate = await updateCustomer(staff.client, bob.id, {
     fullName: 'Bob Test',
@@ -937,6 +1296,20 @@ try {
     '42501',
   );
 
+  const addressEvents = await eventRows(alice.id);
+  check(
+    'address additions are recorded in the activity timeline',
+    addressEvents.some((row) => row.event_type === 'address_added'),
+  );
+  check(
+    'address updates are recorded in the activity timeline',
+    addressEvents.some((row) => row.event_type === 'address_updated'),
+  );
+  check(
+    'address deletions are recorded in the activity timeline',
+    addressEvents.some((row) => row.event_type === 'address_deleted'),
+  );
+
   const finalAliceSearch = await searchCustomers(owner.client, businessA, {
     customerId: alice.id,
   });
@@ -981,6 +1354,22 @@ try {
     [businessA, businessB],
   );
   checkEqual('test addresses are cleaned up', remainingAddressRows.rows[0].count, 0);
+
+  const remainingNotes = await db.query(
+    `select count(*)::int as count
+     from public.customer_notes
+     where business_id in ($1, $2)`,
+    [businessA, businessB],
+  );
+  checkEqual('test notes are cleaned up', remainingNotes.rows[0].count, 0);
+
+  const remainingEvents = await db.query(
+    `select count(*)::int as count
+     from public.customer_events
+     where business_id in ($1, $2)`,
+    [businessA, businessB],
+  );
+  checkEqual('test activity is cleaned up', remainingEvents.rows[0].count, 0);
 
   const remainingUsers = await db.query(
     'select count(*)::int as count from auth.users where email like $1',

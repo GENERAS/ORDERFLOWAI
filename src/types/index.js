@@ -257,6 +257,10 @@ export const PAYMENT_STATUS = Object.freeze({
  */
 
 /**
+ * @typedef {'active'|'inactive'|'archived'} CustomerStatus
+ */
+
+/**
  * @typedef {Object} Customer
  * @property {string} id
  * @property {string} businessId
@@ -265,11 +269,36 @@ export const PAYMENT_STATUS = Object.freeze({
  * @property {string|null} email
  * @property {string|null} phone
  * @property {string|null} notes
+ * @property {CustomerStatus} status
+ * @property {string[]} tags
  * @property {number} addressCount
  * @property {CustomerPrimaryAddress|null} primaryAddress
  * @property {string} createdAt
  * @property {string} updatedAt
  * @property {number} totalCount
+ */
+
+/**
+ * @typedef {Object} CustomerNote
+ * @property {string} id
+ * @property {string} businessId
+ * @property {string} customerId
+ * @property {string} body
+ * @property {string} authorName
+ * @property {string|null} createdBy
+ * @property {string} createdAt
+ */
+
+/**
+ * @typedef {Object} CustomerEvent
+ * @property {string} id
+ * @property {string} businessId
+ * @property {string} customerId
+ * @property {string} eventType
+ * @property {string} description
+ * @property {string|null} actorId
+ * @property {string} actorName
+ * @property {string} createdAt
  */
 
 /**

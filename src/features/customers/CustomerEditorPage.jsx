@@ -22,6 +22,7 @@ import {
 } from '../../components/ui/Card';
 import { FormField } from '../../components/ui/FormField';
 import { PageLoader } from '../../components/ui/PageLoader';
+import { SelectField } from '../../components/ui/SelectField';
 import { controlClasses, labelClasses } from '../../components/ui/formStyles';
 import {
   createCustomer,
@@ -33,10 +34,13 @@ import {
 import { cn } from '../../utils/cn';
 import { useAuth } from '../auth/authContext';
 import {
+  canOverrideCustomerDuplicates,
   customerValuesFromRecord,
+  CUSTOMER_STATUS_OPTIONS,
   DUPLICATE_REASON_LABELS,
   EMPTY_CUSTOMER_FORM,
   getCustomerInitials,
+  parseCustomerTags,
 } from './customerUtils';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -52,6 +56,18 @@ function validateCustomer(form) {
   if (form.email.trim() && !EMAIL_PATTERN.test(form.email.trim())) {
     errors.email = 'Enter a valid email address.';
   }
+
+  if (!CUSTOMER_STATUS_OPTIONS.some((option) => option.value === form.status)) {
+    errors.status = 'Choose a customer status.';
+  }
+
+  const tags = parseCustomerTags(form.tags);
+  if (tags.length > 20) {
+    errors.tags = 'Add no more than 20 tags.';
+  } else if (tags.some((tag) => tag.length > 40)) {
+    errors.tags = 'Each tag must be 40 characters or fewer.';
+  }
+
   return errors;
 }
 
@@ -59,8 +75,11 @@ export default function CustomerEditorPage() {
   const { customerId } = useParams();
   const isNew = !customerId;
   const navigate = useNavigate();
-  const { activeBusiness } = useAuth();
+  const { activeBusiness, activeMembership } = useAuth();
   const businessId = activeBusiness?.id;
+  const canOverrideDuplicate = canOverrideCustomerDuplicates(
+    activeMembership?.role,
+  );
 
   const [form, setForm] = useState(EMPTY_CUSTOMER_FORM);
   const [customer, setCustomer] = useState(null);
@@ -70,6 +89,8 @@ export default function CustomerEditorPage() {
   const [errors, setErrors] = useState({});
   const [duplicates, setDuplicates] = useState([]);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [duplicateOverride, setDuplicateOverride] = useState(false);
+  const [duplicateReason, setDuplicateReason] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -144,6 +165,7 @@ export default function CustomerEditorPage() {
     (match) =>
       match.matchReasons.includes('email') || match.matchReasons.includes('phone'),
   );
+  const parsedTags = parseCustomerTags(form.tags);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -152,24 +174,44 @@ export default function CustomerEditorPage() {
     setError('');
 
     if (Object.keys(nextErrors).length > 0) return;
-    if (hasBlockingDuplicate) {
+
+    const overrideDuplicate = hasBlockingDuplicate && duplicateOverride;
+
+    if (hasBlockingDuplicate && !overrideDuplicate) {
       setError(
-        'Another customer already uses this email or phone. Open the existing record or use different contact details.',
+        'Another customer already uses this email or phone. Open the existing record, use different contact details, or have an owner, admin or manager override the check.',
       );
+      return;
+    }
+
+    if (overrideDuplicate && duplicateReason.trim().length < 3) {
+      setError('Add a short reason for overriding the duplicate check.');
       return;
     }
 
     setSaving(true);
 
+    const profile = {
+      fullName: form.fullName,
+      companyName: form.companyName,
+      email: form.email,
+      phone: form.phone,
+      status: form.status,
+      tags: parseCustomerTags(form.tags),
+      duplicateOverride: overrideDuplicate,
+      duplicateReason: overrideDuplicate ? duplicateReason : '',
+    };
+
     try {
       const saved = isNew
         ? await createCustomer({
             businessId,
-            ...form,
+            ...profile,
+            notes: form.notes,
           })
         : await updateCustomer({
             customerId,
-            ...form,
+            ...profile,
           });
 
       navigate(`/customers/${saved.id}`, {
@@ -293,22 +335,57 @@ export default function CustomerEditorPage() {
                 />
               </div>
 
-              <div>
-                <label htmlFor="customer-notes" className={labelClasses}>
-                  Notes
-                </label>
-                <textarea
-                  id="customer-notes"
-                  rows={4}
-                  value={form.notes}
-                  onChange={(event) => updateField('notes', event.target.value)}
-                  placeholder="Preferences, delivery instructions or other useful context"
-                  className={cn(controlClasses, 'mt-1.5 min-h-28 resize-y')}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <SelectField
+                  id="customer-status"
+                  label="Status"
+                  value={form.status}
+                  onChange={(event) => updateField('status', event.target.value)}
+                  options={CUSTOMER_STATUS_OPTIONS}
+                  placeholder="Select status"
+                  error={errors.status}
+                  required
                 />
-                <p className="mt-1 text-xs text-slate-500">
-                  Up to 2,000 characters. Do not store sensitive payment details here.
-                </p>
+                <FormField
+                  id="customer-tags"
+                  label="Tags"
+                  value={form.tags}
+                  onChange={(event) => updateField('tags', event.target.value)}
+                  placeholder="vip, wholesale, follow-up"
+                  error={errors.tags}
+                  hint="Separate tags with commas. Tags are saved in lowercase."
+                />
               </div>
+
+              {parsedTags.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {parsedTags.map((tag) => (
+                    <Badge key={tag} variant="brand">
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+
+              {isNew ? (
+                <div>
+                  <label htmlFor="customer-notes" className={labelClasses}>
+                    Initial note
+                  </label>
+                  <textarea
+                    id="customer-notes"
+                    rows={4}
+                    value={form.notes}
+                    onChange={(event) => updateField('notes', event.target.value)}
+                    placeholder="Preferences, delivery instructions or other useful context"
+                    className={cn(controlClasses, 'mt-1.5 min-h-28 resize-y')}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    This becomes the first note in the customer timeline. Up to 2,000
+                    characters.
+                  </p>
+                </div>
+              ) : null}
 
               <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-end">
                 <Link
@@ -319,7 +396,7 @@ export default function CustomerEditorPage() {
                 </Link>
                 <Button
                   type="submit"
-                  disabled={saving || hasBlockingDuplicate}
+                  disabled={saving}
                   className="min-w-36"
                 >
                   {saving ? (
@@ -372,6 +449,58 @@ export default function CustomerEditorPage() {
                       phone also matches.
                     </Alert>
                   )}
+
+                  {hasBlockingDuplicate && canOverrideDuplicate ? (
+                    <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 px-3.5 py-3">
+                      <label
+                        htmlFor="customer-duplicate-override"
+                        className="flex cursor-pointer items-start gap-3"
+                      >
+                        <input
+                          id="customer-duplicate-override"
+                          type="checkbox"
+                          checked={duplicateOverride}
+                          onChange={(event) => {
+                            setDuplicateOverride(event.target.checked);
+                            setError('');
+                          }}
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                        />
+                        <span className="text-sm text-slate-700">
+                          <span className="block font-medium text-slate-800">
+                            Override duplicate check
+                          </span>
+                          <span className="mt-0.5 block text-xs text-slate-500">
+                            Owners, admins and managers can keep separate profiles that
+                            share contact details. The override is recorded in the
+                            customer timeline.
+                          </span>
+                        </span>
+                      </label>
+
+                      {duplicateOverride ? (
+                        <FormField
+                          id="customer-duplicate-reason"
+                          label="Override reason"
+                          value={duplicateReason}
+                          onChange={(event) => {
+                            setDuplicateReason(event.target.value);
+                            setError('');
+                          }}
+                          placeholder="Why should this duplicate be allowed?"
+                          hint="Between 3 and 240 characters."
+                          required
+                        />
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {hasBlockingDuplicate && !canOverrideDuplicate ? (
+                    <p className="text-xs text-slate-500">
+                      Only owners, admins and managers can override duplicate contact
+                      details.
+                    </p>
+                  ) : null}
 
                   <ul className="space-y-2">
                     {duplicates.map((match) => (

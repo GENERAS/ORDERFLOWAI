@@ -7,10 +7,34 @@ export const CUSTOMER_SORT_OPTIONS = Object.freeze([
   { value: 'created', label: 'Recently added' },
 ]);
 
+export const CUSTOMER_STATUS_OPTIONS = Object.freeze([
+  { value: 'active', label: 'Active' },
+  { value: 'inactive', label: 'Inactive' },
+  { value: 'archived', label: 'Archived' },
+]);
+
+export const CUSTOMER_STATUS_META = Object.freeze({
+  active: { label: 'Active', variant: 'success' },
+  inactive: { label: 'Inactive', variant: 'warning' },
+  archived: { label: 'Archived', variant: 'neutral' },
+});
+
 export const DUPLICATE_REASON_LABELS = Object.freeze({
   email: 'Email matches',
   phone: 'Phone matches',
   name: 'Name matches',
+});
+
+export const CUSTOMER_EVENT_LABELS = Object.freeze({
+  customer_created: 'Created',
+  customer_updated: 'Profile updated',
+  status_changed: 'Status',
+  tags_updated: 'Tags',
+  note_added: 'Note',
+  address_added: 'Address added',
+  address_updated: 'Address updated',
+  address_deleted: 'Address removed',
+  duplicate_override: 'Duplicate override',
 });
 
 export const EMPTY_CUSTOMER_FORM = Object.freeze({
@@ -19,6 +43,8 @@ export const EMPTY_CUSTOMER_FORM = Object.freeze({
   email: '',
   phone: '',
   notes: '',
+  status: 'active',
+  tags: '',
 });
 
 export const EMPTY_ADDRESS_FORM = Object.freeze({
@@ -35,6 +61,30 @@ export const EMPTY_ADDRESS_FORM = Object.freeze({
 
 export function canManageCustomers(role) {
   return ['owner', 'admin', 'manager', 'staff'].includes(role);
+}
+
+export function canOverrideCustomerDuplicates(role) {
+  return ['owner', 'admin', 'manager'].includes(role);
+}
+
+export function getCustomerStatusMeta(status) {
+  return CUSTOMER_STATUS_META[status] ?? CUSTOMER_STATUS_META.active;
+}
+
+export function parseCustomerTags(value) {
+  const seen = new Set();
+  return String(value ?? '')
+    .split(',')
+    .map((tag) => tag.trim().toLowerCase())
+    .filter((tag) => {
+      if (!tag || seen.has(tag)) return false;
+      seen.add(tag);
+      return true;
+    });
+}
+
+export function formatCustomerTagsInput(tags) {
+  return (tags ?? []).join(', ');
 }
 
 export function getCustomerInitials(fullName) {
@@ -66,6 +116,8 @@ export function customerValuesFromRecord(customer) {
     email: customer.email ?? '',
     phone: customer.phone ?? '',
     notes: customer.notes ?? '',
+    status: customer.status ?? 'active',
+    tags: formatCustomerTagsInput(customer.tags),
   };
 }
 

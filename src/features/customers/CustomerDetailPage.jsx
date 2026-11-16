@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
+  Activity,
   ArrowLeft,
   Building2,
+  History,
   Loader2,
   Mail,
   MapPin,
@@ -24,7 +26,9 @@ import {
 } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { PageLoader } from '../../components/ui/PageLoader';
+import { controlClasses, labelClasses } from '../../components/ui/formStyles';
 import {
+  addCustomerNote,
   deleteCustomerAddress,
   getCustomer,
   toCustomerServiceError,
@@ -41,8 +45,10 @@ import {
 } from '../orders/orderUtils';
 import { CustomerAddressDialog } from './components/CustomerAddressDialog';
 import {
+  CUSTOMER_EVENT_LABELS,
   formatCustomerAddress,
   getCustomerInitials,
+  getCustomerStatusMeta,
 } from './customerUtils';
 
 export default function CustomerDetailPage() {
@@ -53,7 +59,12 @@ export default function CustomerDetailPage() {
 
   const [customer, setCustomer] = useState(null);
   const [addresses, setAddresses] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [events, setEvents] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [noteBody, setNoteBody] = useState('');
+  const [noteError, setNoteError] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(() => location.state?.message ?? '');
@@ -70,6 +81,8 @@ export default function CustomerDetailPage() {
         if (!active) return;
         setCustomer(result.customer);
         setAddresses(result.addresses);
+        setNotes(result.notes);
+        setEvents(result.events);
         if (!result.customer) setError('This customer could not be found.');
         else setError('');
       })
@@ -141,6 +154,32 @@ export default function CustomerDetailPage() {
     }
   };
 
+  const handleAddNote = async (event) => {
+    event.preventDefault();
+    const body = noteBody.trim();
+
+    if (body.length < 2) {
+      setNoteError('Write at least 2 characters before saving.');
+      return;
+    }
+
+    setSavingNote(true);
+    setNoteError('');
+    setError('');
+    setSuccess('');
+
+    try {
+      await addCustomerNote({ customerId: customer.id, body });
+      setNoteBody('');
+      setSuccess('The note was added to the customer timeline.');
+      setRefreshKey((current) => current + 1);
+    } catch (saveError) {
+      setNoteError(toCustomerServiceError(saveError).message);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
   if (loading) return <PageLoader />;
 
   if (!customer) {
@@ -159,6 +198,8 @@ export default function CustomerDetailPage() {
       </section>
     );
   }
+
+  const statusMeta = getCustomerStatusMeta(customer.status);
 
   return (
     <section className="space-y-6" aria-labelledby="customer-detail-title">
@@ -184,8 +225,17 @@ export default function CustomerDetailPage() {
                 >
                   {customer.fullName}
                 </h2>
-                <Badge variant="brand">Customer</Badge>
+                <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
               </div>
+              {customer.tags?.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {customer.tags.map((tag) => (
+                    <Badge key={tag} variant="brand">
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
                 {customer.companyName ? (
                   <span className="inline-flex items-center gap-1.5">
@@ -401,16 +451,113 @@ export default function CustomerDetailPage() {
             <CardHeader>
               <div>
                 <CardTitle>Notes</CardTitle>
-                <CardDescription>Internal customer context.</CardDescription>
+                <CardDescription>
+                  Internal context, newest first. Notes cannot be edited or deleted.
+                </CardDescription>
               </div>
             </CardHeader>
             <CardContent>
-              {customer.notes ? (
-                <p className="whitespace-pre-line text-sm leading-relaxed text-slate-600">
-                  {customer.notes}
-                </p>
+              <form onSubmit={handleAddNote} className="space-y-2">
+                <label htmlFor="customer-note-body" className={labelClasses}>
+                  Add a note
+                </label>
+                <textarea
+                  id="customer-note-body"
+                  rows={3}
+                  value={noteBody}
+                  maxLength={2000}
+                  onChange={(event) => {
+                    setNoteBody(event.target.value);
+                    setNoteError('');
+                  }}
+                  placeholder="What should the team know about this customer?"
+                  className={controlClasses}
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-slate-400">
+                    {noteBody.trim().length}/2000
+                  </span>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={
+                      savingNote ||
+                      noteBody.trim().length < 2 ||
+                      noteBody.trim().length > 2000
+                    }
+                  >
+                    {savingNote ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    Add note
+                  </Button>
+                </div>
+                {noteError ? <p className="text-xs text-red-600">{noteError}</p> : null}
+              </form>
+
+              {notes.length > 0 ? (
+                <ol className="mt-5 space-y-3 border-t border-slate-100 pt-4">
+                  {notes.map((note) => (
+                    <li key={note.id} className="rounded-lg bg-slate-50 px-3 py-3">
+                      <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                        {note.body}
+                      </p>
+                      <p className="mt-2 text-[11px] text-slate-400">
+                        {note.authorName} - {formatDateTime(note.createdAt)}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
               ) : (
-                <p className="text-sm text-slate-400">No notes added yet.</p>
+                <p className="mt-4 text-sm text-slate-400">No notes added yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div>
+                <CardTitle>Activity</CardTitle>
+                <CardDescription>
+                  A read-only audit trail of changes to this customer.
+                </CardDescription>
+              </div>
+              <History
+                className="h-4 w-4 shrink-0 text-slate-400"
+                aria-hidden="true"
+              />
+            </CardHeader>
+            <CardContent>
+              {events.length > 0 ? (
+                <ol className="space-y-4">
+                  {events.map((event) => (
+                    <li key={event.id} className="flex gap-3">
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                        <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-medium text-slate-800">
+                            {CUSTOMER_EVENT_LABELS[event.eventType] ?? event.eventType}
+                          </p>
+                          <span className="text-[11px] text-slate-400">
+                            {formatDateTime(event.createdAt)}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
+                          {event.description}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-slate-400">
+                          by {event.actorName || 'System'}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="text-sm text-slate-400">No activity recorded yet.</p>
               )}
             </CardContent>
           </Card>

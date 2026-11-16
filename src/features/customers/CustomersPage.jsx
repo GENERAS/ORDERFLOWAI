@@ -18,6 +18,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { FormField } from '../../components/ui/FormField';
 import { SelectField } from '../../components/ui/SelectField';
 import {
+  listCustomerTags,
   searchCustomers,
   toCustomerServiceError,
 } from '../../services/customerService';
@@ -26,7 +27,9 @@ import { useAuth } from '../auth/authContext';
 import {
   CUSTOMER_PAGE_SIZE,
   CUSTOMER_SORT_OPTIONS,
+  CUSTOMER_STATUS_OPTIONS,
   getCustomerInitials,
+  getCustomerStatusMeta,
 } from './customerUtils';
 
 export default function CustomersPage() {
@@ -35,9 +38,12 @@ export default function CustomersPage() {
   const businessId = activeBusiness?.id;
   const [filters, setFilters] = useState({
     search: '',
+    status: '',
+    tag: '',
     sort: 'name',
     direction: 'asc',
   });
+  const [tagOptions, setTagOptions] = useState([]);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [customers, setCustomers] = useState([]);
@@ -46,6 +52,23 @@ export default function CustomersPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(() => location.state?.message ?? '');
   const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    if (!businessId) return undefined;
+
+    listCustomerTags(businessId)
+      .then((tags) => {
+        if (active) setTagOptions(tags);
+      })
+      .catch((loadError) => {
+        if (active) setError(toCustomerServiceError(loadError).message);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [businessId]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -65,6 +88,8 @@ export default function CustomersPage() {
     searchCustomers({
       businessId,
       search: debouncedSearch,
+      status: filters.status,
+      tag: filters.tag,
       page,
       pageSize: CUSTOMER_PAGE_SIZE,
       sort: filters.sort,
@@ -90,6 +115,8 @@ export default function CustomersPage() {
   }, [
     businessId,
     debouncedSearch,
+    filters.status,
+    filters.tag,
     filters.sort,
     filters.direction,
     page,
@@ -111,7 +138,13 @@ export default function CustomersPage() {
   };
 
   const clearFilters = () => {
-    setFilters({ search: '', sort: 'name', direction: 'asc' });
+    setFilters({
+      search: '',
+      status: '',
+      tag: '',
+      sort: 'name',
+      direction: 'asc',
+    });
     setDebouncedSearch('');
     setPage(1);
     setLoading(true);
@@ -124,8 +157,15 @@ export default function CustomersPage() {
 
   const hasFilters =
     Boolean(filters.search) ||
+    Boolean(filters.status) ||
+    Boolean(filters.tag) ||
     filters.sort !== 'name' ||
     filters.direction !== 'asc';
+
+  const tagSelectOptions = tagOptions.map(({ tag, customerCount }) => ({
+    value: tag,
+    label: `${tag} (${customerCount})`,
+  }));
   const totalPages = Math.max(1, Math.ceil(total / CUSTOMER_PAGE_SIZE));
 
   return (
@@ -173,15 +213,31 @@ export default function CustomersPage() {
       ) : null}
 
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] lg:items-end">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
           <FormField
             id="customer-search"
             label="Search customers"
             type="search"
-            placeholder="Name, company, email, phone or address"
+            placeholder="Name, company, email, phone, tag or address"
             value={filters.search}
             onChange={(event) => updateFilter('search', event.target.value)}
             trailing={<Search className="h-4 w-4 text-slate-400" aria-hidden="true" />}
+          />
+          <SelectField
+            id="customer-status-filter"
+            label="Status"
+            value={filters.status}
+            onChange={(event) => updateFilter('status', event.target.value)}
+            options={CUSTOMER_STATUS_OPTIONS}
+            placeholder="All statuses"
+          />
+          <SelectField
+            id="customer-tag-filter"
+            label="Tag"
+            value={filters.tag}
+            onChange={(event) => updateFilter('tag', event.target.value)}
+            options={tagSelectOptions}
+            placeholder="All tags"
           />
           <SelectField
             id="customer-sort"
@@ -233,7 +289,7 @@ export default function CustomersPage() {
           title={hasFilters ? 'No customers match these filters' : 'No customers yet'}
           description={
             hasFilters
-              ? 'Clear the search or change the sort order.'
+              ? 'Clear the search, status or tag filters to see more customers.'
               : 'Add a customer manually, then link them to future conversations and orders.'
           }
           action={
@@ -278,11 +334,29 @@ export default function CustomersPage() {
                     <p className="mt-0.5 text-xs text-slate-400">Individual customer</p>
                   )}
                 </div>
-                <Badge variant={customer.addressCount > 0 ? 'success' : 'neutral'}>
-                  {customer.addressCount} address
-                  {customer.addressCount === 1 ? '' : 'es'}
-                </Badge>
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  <Badge variant={getCustomerStatusMeta(customer.status).variant}>
+                    {getCustomerStatusMeta(customer.status).label}
+                  </Badge>
+                  <Badge variant={customer.addressCount > 0 ? 'success' : 'neutral'}>
+                    {customer.addressCount} address
+                    {customer.addressCount === 1 ? '' : 'es'}
+                  </Badge>
+                </div>
               </div>
+
+              {customer.tags?.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {customer.tags.slice(0, 5).map((tag) => (
+                    <Badge key={tag} variant="brand">
+                      {tag}
+                    </Badge>
+                  ))}
+                  {customer.tags.length > 5 ? (
+                    <Badge variant="neutral">+{customer.tags.length - 5}</Badge>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div className="mt-4 space-y-2 text-sm">
                 {customer.email ? (

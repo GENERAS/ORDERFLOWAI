@@ -7,9 +7,9 @@ payments through a single multi-tenant SaaS workspace.
 > **Current status: Day 7 — order management.**
 > The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
 > a real product catalogue, live inventory with physical, reserved and available stock,
-> customer profiles with contact details and duplicate detection, and orders with agreed prices,
-> activity history, lifecycle rules and automatic stock reservations. Payments and AI remain
-> later phases.
+> customer profiles with status, tags, note history, activity and duplicate overrides, and orders
+> with agreed prices, activity history, lifecycle rules and automatic stock reservations. Payments
+> and AI remain later phases.
 
 ## What is included in this build
 
@@ -38,12 +38,14 @@ payments through a single multi-tenant SaaS workspace.
   and releases, with idempotency and concurrency protection.
 - Inventory dashboard with low-stock/out-of-stock filters, overview metrics, tracking controls and
   paginated movement history.
-- Customer profiles with normalised email/phone contacts, company names and internal notes.
+- Customer profiles with normalised email/phone contacts, company names, status, tags and notes.
 - Customer address book with labels, recipient details, default-address handling and business-country
   defaults.
-- Server-side customer search across name, company, email, phone and address, plus duplicate detection
-  before saving.
-- Customer list, create/edit forms, customer detail, address dialog and recent order history.
+- Server-side customer search across name, company, email, phone, tags and address, plus status/tag
+  filters and duplicate detection with audited overrides.
+- Append-only note history and a read-only activity timeline.
+- Customer list, create/edit forms, customer detail, note composer, address dialog and recent order
+  history.
 - Order list with live metrics, search, status filters, sorting and pagination.
 - Order editor with customer selection, catalogue search, variants, quantities and agreed prices.
 - Order detail page with status actions, reservation state, totals, activity history and cancellation.
@@ -118,7 +120,7 @@ data-backed feature will remain unavailable until credentials are added.
 | `npm run test:auth` | Run Day 3 auth, onboarding and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:catalogue` | Run Day 4 catalogue, storage and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:inventory` | Run Day 5 inventory balance, ledger, concurrency and RLS integration tests (requires `.env.local` and the DB password) |
-| `npm run test:customers` | Run Day 6 customer profile, duplicate, address and RLS integration tests (requires `.env.local` and the DB password) |
+| `npm run test:customers` | Run Day 6 customer profile, status/tag, note, activity, duplicate, address and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:orders` | Run Day 7 order lifecycle, stock, numbering, snapshot and RLS integration tests (requires `.env.local` and the DB password) |
 
 ## Environment variables
@@ -173,7 +175,7 @@ src/
     orders/                   Order list, editor, detail, status actions, services and helpers
     products/                 Catalogue list, product editor, taxonomy pages, services and helpers
     inventory/                Stock dashboard, item detail, ledger, services and helpers
-    customers/                Customer list, profile editor, detail, addresses and helpers
+    customers/                Customer list, profile editor, detail, notes, activity, addresses and helpers
     payments/                 Payments module scaffold
     reports/                  Reports module scaffold
     team/                     Team and permissions module scaffold
@@ -187,7 +189,7 @@ src/
     authService.js            Auth, profile, membership and business RPC calls
     catalogueService.js       Catalogue CRUD, taxonomy, search and product-image storage
     inventoryService.js       Inventory search, metrics, stock operations and tracking settings
-    customerService.js        Customer search, profiles, duplicate detection and addresses
+    customerService.js        Customer search, profiles, tags, notes, activity, duplicates and addresses
     orderService.js           Order search, catalogue, creation, editing, status and cancellation
     baseService.js            Paginated data-access layer and retry helper
   types/
@@ -197,7 +199,7 @@ scripts/
   day3-auth-tests.mjs         Auth, onboarding and RLS integration tests
   day4-catalogue-tests.mjs    Catalogue, storage and RLS integration tests
   day5-inventory-tests.mjs    Inventory balance, ledger, concurrency and RLS integration tests
-  day6-customer-tests.mjs     Customer profile, duplicate, address and RLS integration tests
+  day6-customer-tests.mjs     Customer profile, status/tag, note, activity, duplicate, address and RLS tests
   day7-order-tests.mjs        Order lifecycle, stock, numbering, snapshot and RLS integration tests
 ```
 
@@ -222,8 +224,8 @@ scripts/
 - **Atomic inventory writes.** Stock balances change only through the validated
   `record_stock_operation` RPC, which locks the item, enforces reservation rules and appends an
   immutable ledger row in the same transaction.
-- **Atomic customer writes.** Customer profiles and addresses are created or changed only through
-  validated security-definer RPCs; the browser has select-only table access.
+- **Atomic customer writes.** Customer profiles, notes and addresses are created or changed only
+  through validated security-definer RPCs; the browser has select-only table access.
 - **Atomic order writes.** Order creation, editing, status changes and cancellation go through
   security-definer RPCs. The database enforces numbering, snapshots, transition rules, totals and
   stock reservation in the same transaction.
@@ -258,8 +260,10 @@ scripts/
   active membership, pass through security-definer RPCs and are recorded in an immutable ledger.
 - Stock-operation idempotency keys and row locks prevent duplicate movements and concurrent
   overselling.
-- Customer tables grant select-only access to active members. Profile and address writes go through
-  security-definer RPCs, and email/phone uniqueness is scoped per business.
+- Customer tables grant select-only access to active members. Profile, note and address writes go
+  through security-definer RPCs. Email/phone duplicates are scoped per business and can only be
+  overridden by owners, admins or managers with a recorded reason.
+- Customer notes and activity are read-only to clients; direct writes are denied.
 - Customer duplicate detection never reads outside the selected business.
 - Order tables grant select-only access to active members. Order writes go through security-definer
   RPCs, and order activity cannot be updated after it is written.
@@ -380,40 +384,48 @@ It runs 96 checks against the linked project and cleans up its test users and bu
 ## Customer management (Day 6)
 
 Day 6 turns the Customers placeholder into a real customer module with profiles, contact details,
-addresses and duplicate detection. Full implementation notes and the test matrix are in
-[`docs/day6-customers.md`](docs/day6-customers.md).
+addresses, status, tags, note history, activity and duplicate detection. Full implementation notes
+and the test matrix are in [`docs/day6-customers.md`](docs/day6-customers.md).
 
-The schema and RPCs are in `supabase/migrations/20261116010000_day6_customer_management.sql`.
+The base schema and RPCs are in `supabase/migrations/20261116010000_day6_customer_management.sql`.
+The CRM enhancements are in `supabase/migrations/20261118010000_day6_crm_enhancements.sql`.
 
 **Customer routes**
 
 | Route | Purpose |
 | --- | --- |
-| `/customers` | Searchable, sortable, paginated customer list. |
-| `/customers/new` | Create a customer with validated contact details. |
-| `/customers/:customerId` | Contact details, addresses, notes and recent order history. |
-| `/customers/:customerId/edit` | Edit the customer profile. |
+| `/customers` | Searchable, status/tag-filterable, sortable, paginated customer list. |
+| `/customers/new` | Create a customer with validated contact details, status and tags. |
+| `/customers/:customerId` | Contact details, tags, note history, activity and recent order history. |
+| `/customers/:customerId/edit` | Edit the customer profile, status and tags. |
 
 **Customer model**
 
 - Customers require at least one email address or phone number.
 - Emails are normalised to lowercase. Rwanda phone numbers are normalised to `250...` so local and
   international formats match.
-- Exact email and phone duplicates are blocked per business. A matching name without matching contact
-  details is a warning, not a block.
+- Exact email and phone duplicates are blocked per business by default. Owners, admins and managers
+  can override with a 3–240 character reason; overrides are recorded in the activity timeline.
+- A matching name without matching contact details is a warning, not a block.
+- Status is `active`, `inactive` or `archived`. Tags are lowercase, unique, limited to 20 per
+  customer and 40 characters each.
+- Notes are append-only history entries, while the activity timeline records profile, status, tag,
+  note and address changes.
 - Customers can have multiple labelled addresses, with exactly one default address. Deleting the
   default promotes the earliest remaining address.
 - Addresses inherit the business country unless a valid two-letter country code is supplied.
-- Customer search covers name, company, email, phone and address text.
+- Customer search covers name, company, email, phone, tags and address text.
 - Customer order history now shows real orders created in the Day 7 order module.
 
 **Roles and RPCs**
 
-- All four active roles can create and edit customers and addresses.
+- All four active roles can create and edit customers, notes and addresses.
+- Only owners, admins and managers can override duplicate contact details.
 - Table access is select-only for active members; direct insert/update/delete is denied.
 - Writes require authentication and active membership through `create_customer`, `update_customer`,
-  `save_customer_address` and `delete_customer_address`.
-- Duplicate detection uses `find_customer_duplicates`; listing and lookup use `search_customers`.
+  `add_customer_note`, `save_customer_address` and `delete_customer_address`.
+- Duplicate detection uses `find_customer_duplicates`; listing, lookup, filters and tag listing use
+  `search_customers` and `list_customer_tags`.
 
 **Customer tests**
 
@@ -422,10 +434,11 @@ The schema and RPCs are in `supabase/migrations/20261116010000_day6_customer_man
 npm run test:customers
 ```
 
-The suite exercises profile validation, email/phone normalisation, duplicate blocking and warnings,
-search/sort/pagination, address defaults and promotion, role permissions, direct-write denial,
-cross-tenant RLS, duplicate-detection isolation and cleanup. It runs 136 checks against the linked
-project and cleans up its test users, businesses and customer records.
+The suite exercises profile validation, email/phone normalisation, duplicate blocking/overrides,
+status and tags, tags listing, search/filter/sort/pagination, note history, activity events, address
+defaults and promotion, role permissions, direct-write denial, cross-tenant RLS, isolation and
+cleanup. It runs 219 checks against the linked project and cleans up its test users, businesses and
+customer records.
 
 ## Order management (Day 7)
 
@@ -660,21 +673,23 @@ The following are scheduled for later phases and deliberately excluded from Days
 ## Day 6 acceptance checklist
 
 - [x] Customer tables, contact constraints, normalised phone storage and indexes defined.
+- [x] Customer status, tags, note history and activity timeline added.
 - [x] Row Level Security and active-membership access enforced.
-- [x] Select-only table grants; customer and address writes require security-definer RPCs.
-- [x] Atomic create/update customer RPCs with validated email, phone and contact requirements.
-- [x] Per-business email and phone uniqueness with friendly duplicate errors.
+- [x] Select-only table grants; customer, note and address writes require security-definer RPCs.
+- [x] Atomic create/update customer RPCs with validated email, phone, status, tags and contact requirements.
+- [x] Per-business email and phone duplicate protection with audited owner/admin/manager overrides.
 - [x] Duplicate detection for email, phone and name, excluding the edited customer and other businesses.
+- [x] Append-only notes and read-only activity events.
 - [x] Address create/update/delete RPCs with one default per customer and promotion on delete.
 - [x] Address country defaults to the business country and validates ISO two-letter codes.
-- [x] Server-side customer search across name, company, email, phone and address.
-- [x] Pagination, sorting and full filtered totals.
-- [x] Customer list, create/edit form, detail page and address dialog implemented.
-- [x] Order history remains an honest placeholder until the orders module is built.
-- [x] Day 6 customer/profile/address/RLS integration tests pass.
+- [x] Server-side customer search across name, company, email, phone, tags and address.
+- [x] Status/tag filters, pagination, sorting and full filtered totals.
+- [x] Customer list, create/edit form, detail page, note composer and address dialog implemented.
+- [x] Customer detail shows tags, note history, activity and real Day 7 order history.
+- [x] Day 6 customer/status/tag/note/activity/address/RLS integration tests pass (219 checks).
 - [x] Day 2 RLS isolation, Day 3 auth, Day 4 catalogue, Day 5 inventory, lint and production build
   still pass.
-- [x] Day 6 migration applied to the linked Supabase project.
+- [x] Day 6 base and CRM enhancement migrations applied to the linked Supabase project.
 
 ## Day 7 acceptance checklist
 
