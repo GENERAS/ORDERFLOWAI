@@ -1,5 +1,11 @@
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? '').trim();
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
+const metaAppId = (import.meta.env.VITE_META_APP_ID ?? '').trim();
+const metaConfigId = (import.meta.env.VITE_META_CONFIG_ID ?? '').trim();
+const metaGraphApiVersion =
+  (import.meta.env.VITE_META_GRAPH_API_VERSION ?? '').trim() || 'v25.0';
+const metaEmbeddedSignupVersion =
+  (import.meta.env.VITE_META_EMBEDDED_SIGNUP_VERSION ?? '').trim() || 'v4';
 
 /**
  * Frontend-safe environment configuration.
@@ -10,6 +16,10 @@ export const env = Object.freeze({
   supabaseUrl,
   supabaseAnonKey,
   isSupabaseConfigured: Boolean(supabaseUrl && supabaseAnonKey),
+  metaAppId,
+  metaConfigId,
+  metaGraphApiVersion,
+  metaEmbeddedSignupVersion,
 });
 
 if (!env.isSupabaseConfigured && import.meta.env.DEV) {

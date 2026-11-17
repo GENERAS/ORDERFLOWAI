@@ -17,6 +17,7 @@ const WorkspacesPage = lazy(() => import('./features/workspaces/WorkspacesPage')
 
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
 const InboxPage = lazy(() => import('./features/inbox/InboxPage'));
+const ChannelsPage = lazy(() => import('./features/channels/ChannelsPage'));
 const OrdersPage = lazy(() => import('./features/orders/OrdersPage'));
 const OrderEditorPage = lazy(
   () => import('./features/orders/OrderEditorPage'),
@@ -101,6 +102,7 @@ export default function App() {
                 <Route element={<AppLayout />}>
                   <Route path="overview" element={<DashboardPage />} />
                   <Route path="inbox" element={<InboxPage />} />
+                  <Route path="channels" element={<ChannelsPage />} />
                   <Route path="orders" element={<OrdersPage />} />
                   <Route path="orders/new" element={<OrderEditorPage />} />
                   <Route

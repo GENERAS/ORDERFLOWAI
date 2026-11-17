@@ -4,6 +4,7 @@ import {
   CreditCard,
   Inbox,
   LayoutDashboard,
+  MessageCircleMore,
   Package,
   Settings,
   ShoppingCart,
@@ -15,6 +16,7 @@ import {
 export const navigationItems = Object.freeze([
   { label: 'Overview', to: '/overview', icon: LayoutDashboard },
   { label: 'Inbox', to: '/inbox', icon: Inbox },
+  { label: 'Channels', to: '/channels', icon: MessageCircleMore },
   { label: 'Orders', to: '/orders', icon: ShoppingCart },
   { label: 'Products', to: '/products', icon: Package },
   { label: 'Online Store', to: '/store', icon: Store },

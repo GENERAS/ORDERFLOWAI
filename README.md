@@ -4,15 +4,17 @@ AI-powered product discovery and order automation for businesses. OrderFlow AI c
 customer conversations to a business's real product catalogue, order records, inventory and
 payments through a single multi-tenant SaaS workspace.
 
-> **Current status: Day 10 — media storage and asset management.**
+> **Current status: Day 11 — communication infrastructure.**
 > The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
 > a real product catalogue, live inventory with physical, reserved and available stock,
 > customer profiles with status, tags, note history, activity and duplicate overrides, orders
 > with server-authoritative prices, guest checkout, customer/business confirmation, activity history,
 > lifecycle rules and automatic stock reservations, independent payment tracking with partial
 > payments, verification, refunds, payment history and currency-aware reporting, public
-> per-business storefronts with anonymous catalogue browsing and real order submission, and a central
-> media layer for product images and store logos. AI remains a later phase.
+> per-business storefronts with anonymous catalogue browsing and real order submission, a central
+> media layer for product images and store logos, and a provider-independent channel/inbox layer
+> with official Meta WhatsApp Cloud API code paths. No WhatsApp account or Cloudinary account is
+> claimed connected until real credentials and live tests are completed. AI remains a later phase.
 
 ## What is included in this build
 
@@ -68,9 +70,15 @@ payments through a single multi-tenant SaaS workspace.
 - Anonymous checkout that creates real shared-order-engine orders with server prices, stock reservation,
   idempotency and no fake payment status.
 - Reusable paginated data-access layer with normalised errors and a retry helper.
+- Provider-independent channel connection records with server-side credentials and no browser secrets.
+- Official Meta WhatsApp Embedded Signup, webhook verification, signed webhook ingestion and Graph API
+  send/media paths through Supabase Edge Functions.
+- Shared inbox with conversation history, customer/order linkage, assignment, status/handover,
+  unread state, opt-outs and 24-hour service-window/template enforcement.
+- Idempotent webhook and outbound-message processing with audited delivery states and cross-tenant denial.
 - Shared domain constants and JSDoc types for future features.
-- ESLint configuration, auth/catalogue/inventory/customer/order integration tests and a documented
-  Supabase setup workflow.
+- ESLint configuration, auth/catalogue/inventory/customer/order/media/communication integration tests
+  and a documented Supabase setup workflow.
 
 ## Technology stack
 
@@ -82,7 +90,7 @@ payments through a single multi-tenant SaaS workspace.
 | Auth | Supabase Auth (email/password) |
 | Database | Supabase PostgreSQL with Row Level Security |
 | Storage | Supabase Storage or Cloudinary through one media adapter layer, with signed delivery URLs |
-| Backend functions | Supabase Edge Functions (Cloudinary media signing, deletion and cleanup; AI workflows later) |
+| Backend functions | Supabase Edge Functions (Cloudinary media signing, deletion and cleanup; Meta WhatsApp connect/webhook/send/media; AI workflows later) |
 | AI | Provider selected in a later phase, called only from backend functions |
 | Deployment | Vercel-compatible static build |
 
@@ -141,6 +149,7 @@ data-backed feature will remain unavailable until credentials are added.
 | `npm run test:payments` | Run Day 8 payment, refund, reporting, numbering, idempotency and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:storefront` | Run Day 9 storefront, checkout, stock reservation, image access and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:media` | Run Day 10 media provider, upload lifecycle, storage, public access, RLS and cleanup integration tests (requires `.env.local` and the DB password) |
+| `npm run test:comms` | Run Day 11 channel, signature, webhook, inbox, message, media-access, opt-out and RLS integration tests (requires `.env.local` and the DB password) |
 
 ## Environment variables
 
@@ -151,6 +160,10 @@ the browser.
 | --- | --- | --- |
 | `VITE_SUPABASE_URL` | Yes (for data) | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | Yes (for data) | Public browser key: legacy anon key or newer publishable key (`sb_publishable_...`) |
+| `VITE_META_APP_ID` | For WhatsApp UI | Public Meta app ID used by Embedded Signup |
+| `VITE_META_CONFIG_ID` | For WhatsApp UI | Public Meta Embedded Signup configuration ID |
+| `VITE_META_GRAPH_API_VERSION` | No | Graph API version used by frontend links; defaults to `v25.0` |
+| `VITE_META_EMBEDDED_SIGNUP_VERSION` | No | Embedded Signup version; defaults to `v4`, supports `v5` |
 
 The project access token is **not** a frontend variable. It is stored via the Supabase CLI
 login (Windows Credential Manager) and is used only for management and migration commands.
@@ -170,6 +183,10 @@ mailer, which is rate-limited to two auth emails per hour.
 - Server-side secrets belong in Supabase Edge Function secrets, not the frontend.
 - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` are Edge Function secrets
   only. The browser never receives them and Cloudinary is not connected until they are deployed.
+- `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` and `SUPABASE_SERVICE_ROLE_KEY` are Edge Function
+  secrets only. The browser receives only the public Meta app/config IDs.
+- Channel credentials live in `private.channel_credentials`; authenticated users cannot read tokens and
+  service-role RPCs are reserved for deployed server-to-server flows.
 
 Supabase credentials are available under **Project Settings → API** in the Supabase dashboard.
 
@@ -192,7 +209,8 @@ src/
     onboarding/               Business workspace setup
     workspaces/               Multi-workspace picker
     dashboard/                Dashboard page and dashboard-specific components
-    inbox/                    Unified inbox module scaffold
+    channels/                 Channel status and Meta WhatsApp Embedded Signup UI
+    inbox/                    Shared inbox, conversation history, composer, assignment and status controls
     orders/                   Order list, editor, detail, status actions, services and helpers
     products/                 Catalogue list, product editor, taxonomy pages, services and helpers
     inventory/                Stock dashboard, item detail, ledger, services and helpers
@@ -216,6 +234,7 @@ src/
     paymentService.js         Payment search, summaries, recording, verification, refunds and history
     mediaStorageManager.js    Provider-independent media upload, delete, usage and URL manager
     media/                    Cloudinary/Supabase adapters, URL resolution and media error mapping
+    communicationService.js   Channel, conversation, message, send, media, assignment and opt-out API
     baseService.js            Paginated data-access layer and retry helper
   types/
     index.js                  Domain constants and JSDoc typedefs
@@ -229,9 +248,13 @@ scripts/
   day8-payment-tests.mjs      Payment, refund, reporting, numbering, idempotency and RLS integration tests
   day9-storefront-tests.mjs   Storefront, checkout, stock reservation, image access and RLS integration tests
   day10-media-tests.mjs       Media provider, upload lifecycle, access, usage and RLS integration tests
+  day11-communication-tests.mjs Channel, webhook, inbox, message, media-access, opt-out and RLS tests
 ```
 
-Edge functions live in `supabase/functions/media-manager/index.ts`.
+Edge functions live in `supabase/functions/media-manager/index.ts`,
+`supabase/functions/whatsapp-connect/index.ts`, `supabase/functions/whatsapp-webhook/index.ts`
+(with shared `signature.js`), `supabase/functions/whatsapp-send/index.ts` and
+`supabase/functions/whatsapp-media/index.ts`.
 
 ### Architectural rules
 
@@ -269,6 +292,9 @@ Edge functions live in `supabase/functions/media-manager/index.ts`.
   business-scoped storage policies.
 - **Central media lifecycle.** New product/logo uploads start, complete, fail and delete through one
   manager and security-definer RPCs. Provider credentials stay server-side.
+- **Server-owned communication writes.** Channel connections, conversations, messages, delivery states,
+  opt-outs and audit records change through validated security-definer RPCs; the browser cannot write
+  credentials or fabricate provider statuses.
 - **Lazy routes.** Pages are code-split via `React.lazy` to keep the initial bundle small.
 - **Shared navigation config.** `src/config/navigation.js` drives both the sidebar and the
   header title so routes cannot drift apart.
@@ -323,7 +349,13 @@ Edge functions live in `supabase/functions/media-manager/index.ts`.
   security-definer RPCs with role/platform-admin checks.
 - Cloudinary API keys and secret live only in Edge Function secrets. The browser sends the user JWT and
   adapter fields; it never receives service-role credentials or provider secrets.
-- No fake authentication, fake sessions, fake payment gateways, fake uploads or fake production data is implemented.
+- Communication credentials are private, provider tokens are never returned to the browser, webhook
+  signatures are verified before processing, provider event IDs are idempotent, and delivery/read states
+  require real webhook events.
+- Cross-business conversation, message, media, assignment and opt-out operations are denied by RPC
+  checks and RLS; channel writes require an active membership through server-side RPCs.
+- No fake authentication, fake sessions, fake payment gateways, fake uploads, fake connected accounts,
+  fake messages or fake production data is implemented.
 
 ## Database (Day 2)
 
@@ -691,6 +723,48 @@ The suite runs 89 checks covering provider config authorization, validation, RLS
 start, signed storage upload, completion, product/logo attachment, public access, URL resolution,
 usage, failures, attached-asset delete protection, limits, removal and cleanup.
 
+## Communication infrastructure (Day 11)
+
+Day 11 adds provider-independent channel records, official Meta WhatsApp Business Cloud API paths,
+signed webhook ingestion, a shared inbox and server-authorized messages. Full implementation notes,
+RPCs, Edge Function secrets, status boundaries and the test matrix are in
+[`docs/day11-communication-infrastructure.md`](docs/day11-communication-infrastructure.md).
+
+The schema and RPCs are in
+`supabase/migrations/20261123010000_day11_communication_infrastructure.sql`, with a corrected webhook
+function applied separately after the migration.
+
+**Communication routes**
+
+| Route | Purpose |
+| --- | --- |
+| `/channels` | WhatsApp connection status, Embedded Signup and disconnect control. |
+| `/inbox` | Shared conversation list, history, customer/order panel, composer, assignment and status controls. |
+
+**Communication model**
+
+- Credentials live in `private.channel_credentials`; the browser only sees connection metadata.
+- Meta Embedded Signup defaults to v4; v2/v3 are deprecated and v5 is available by configuration.
+- Inbound webhooks verify `X-Hub-Signature-256` before processing and use provider message IDs for idempotency.
+- Customer matching uses normalized `from` phone numbers; names alone never merge customers.
+- Outbound creation enforces 24-hour windows, templates, opt-outs and same-business ready media assets.
+- API acceptance is separate from webhook delivery/read/failure states.
+- Assignment, status changes and opt-outs are audited and blocked across businesses.
+
+**Communication tests**
+
+```powershell
+. .\scripts\load-supabase-db-password.ps1
+npm run test:comms
+```
+
+The suite runs 101 checks with local fixtures only. It covers signatures, RLS, credential protection,
+webhook ingestion, duplicates, customer matching, service windows, templates, idempotent sends,
+delivery states, opt-outs, media ownership, assignment, pagination and cross-tenant denial. No real
+WhatsApp message is sent. A
+real WABA, deployed Edge Functions and production approval are still required before connectivity or
+message delivery can be claimed.
+
 ## Authentication and onboarding (Day 3)
 
 Day 3 adds a complete auth and workspace-entry flow. Full implementation notes and the test
@@ -778,13 +852,14 @@ instead of a Vercel 404.
 
 ## Intentionally not built yet
 
-The following are scheduled for later phases and deliberately excluded from Days 1–9:
+The following are scheduled for later phases and deliberately excluded or still incomplete after Days 1–11:
 
 - Purchase orders, suppliers and automated replenishment.
 - Invoices and live payment-provider gateway integrations.
 - Public online payment collection on storefront orders.
 - AI product discovery and AI order extraction.
-- WhatsApp, Instagram or Facebook integrations.
+- Instagram or Facebook channel integrations. WhatsApp infrastructure is implemented but not connected
+  to a real WABA or approved for production.
 - Visual/image product search.
 - Reports based on live data.
 
@@ -965,6 +1040,28 @@ The following are scheduled for later phases and deliberately excluded from Days
 - [x] Day 2 RLS isolation through Day 9, lint and production build still pass.
 - [x] Day 10 media, URL-resolver and filename-fix migrations applied to the linked Supabase project.
 - [ ] Cloudinary live upload/delete verified after real credentials and Edge Function deployment.
+
+## Day 11 acceptance checklist
+
+- [x] Provider-independent channel, connection, credential, conversation, message, webhook, audit and
+  opt-out tables defined.
+- [x] Provider credentials are private and inaccessible to browser users.
+- [x] Meta WhatsApp Embedded Signup, webhook verification/signature, send and media Edge Function code
+  paths implemented.
+- [x] Signed webhook ingestion verifies HMAC-SHA256 before processing.
+- [x] Duplicate provider events and duplicate send requests are idempotent.
+- [x] Conversations link to same-business customers and real orders without name-only merging.
+- [x] Outbound messages enforce 24-hour windows, templates, opt-outs and media ownership.
+- [x] Delivery/read/failure states come from webhook events, not client claims.
+- [x] Assignment, status, unread and opt-out changes are audited and role/membership checked.
+- [x] Shared inbox and channel pages use the central service layer.
+- [x] Row Level Security, direct-write denial and cross-tenant denial are enforced.
+- [x] Day 11 communication/webhook/RLS integration suite passes (101 checks).
+- [x] Day 11 suite, lint, build and Days 3–10 regressions verified.
+- [x] Day 11 migration applied to the linked Supabase project.
+- [ ] Meta app credentials, webhook URL, real WABA and phone number verified in a Meta test environment.
+- [ ] Edge Functions deployed and a real outbound message/webhook round trip verified.
+- [ ] Production approval and live channel connectivity verified.
 
 ## License
 
