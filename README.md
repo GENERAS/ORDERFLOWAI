@@ -4,13 +4,14 @@ AI-powered product discovery and order automation for businesses. OrderFlow AI c
 customer conversations to a business's real product catalogue, order records, inventory and
 payments through a single multi-tenant SaaS workspace.
 
-> **Current status: Day 8 — payment management.**
+> **Current status: Day 9 — public multi-tenant storefront.**
 > The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
 > a real product catalogue, live inventory with physical, reserved and available stock,
 > customer profiles with status, tags, note history, activity and duplicate overrides, orders
 > with server-authoritative prices, guest checkout, customer/business confirmation, activity history,
-> lifecycle rules and automatic stock reservations, and independent payment tracking with partial
-> payments, verification, refunds, payment history and currency-aware reporting. AI remains a later phase.
+> lifecycle rules and automatic stock reservations, independent payment tracking with partial
+> payments, verification, refunds, payment history and currency-aware reporting, and public
+> per-business storefronts with anonymous catalogue browsing and real order submission. AI remains a later phase.
 
 ## What is included in this build
 
@@ -59,6 +60,10 @@ payments through a single multi-tenant SaaS workspace.
   rejection, failure handling, refund requests, refund resolution and immutable payment history.
 - Currency-aware payment metrics and derived order payment status independent of order fulfilment.
 - Default per-business payment methods, sequential payment numbers and idempotent payment/refund RPCs.
+- Public per-business storefronts with a slug URL, store profile, search, categories, sorting and pagination.
+- Store management for public profile details, logo, published contact information and product visibility.
+- Anonymous checkout that creates real shared-order-engine orders with server prices, stock reservation,
+  idempotency and no fake payment status.
 - Reusable paginated data-access layer with normalised errors and a retry helper.
 - Shared domain constants and JSDoc types for future features.
 - ESLint configuration, auth/catalogue/inventory/customer/order integration tests and a documented
@@ -73,7 +78,7 @@ payments through a single multi-tenant SaaS workspace.
 | Language | JavaScript (ES modules) |
 | Auth | Supabase Auth (email/password) |
 | Database | Supabase PostgreSQL with Row Level Security |
-| Storage | Supabase Storage (private product images) |
+| Storage | Supabase Storage (private product images and store logos with signed URLs) |
 | Backend functions | Supabase Edge Functions (AI workflows, later phase) |
 | AI | Provider selected in a later phase, called only from backend functions |
 | Deployment | Vercel-compatible static build |
@@ -131,6 +136,7 @@ data-backed feature will remain unavailable until credentials are added.
 | `npm run test:customers` | Run Day 6 customer profile, status/tag, note, activity, duplicate, address and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:orders` | Run Day 7 order lifecycle, stock, numbering, snapshot and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:payments` | Run Day 8 payment, refund, reporting, numbering, idempotency and RLS integration tests (requires `.env.local` and the DB password) |
+| `npm run test:storefront` | Run Day 9 storefront, checkout, stock reservation, image access and RLS integration tests (requires `.env.local` and the DB password) |
 
 ## Environment variables
 
@@ -186,6 +192,7 @@ src/
     inventory/                Stock dashboard, item detail, ledger, services and helpers
     customers/                Customer list, profile editor, detail, notes, activity, addresses and helpers
     payments/                 Payment dashboard, detail, recording, refunds, actions and helpers
+    storefront/               Public storefront pages, cart context, service layer and store management
     reports/                  Reports module scaffold
     team/                     Team and permissions module scaffold
     settings/                 Business settings module scaffold
@@ -212,6 +219,7 @@ scripts/
   day6-customer-tests.mjs     Customer profile, status/tag, note, activity, duplicate, address and RLS tests
   day7-order-tests.mjs        Order lifecycle, stock, numbering, snapshot and RLS integration tests
   day8-payment-tests.mjs      Payment, refund, reporting, numbering, idempotency and RLS integration tests
+  day9-storefront-tests.mjs   Storefront, checkout, stock reservation, image access and RLS integration tests
 ```
 
 ### Architectural rules
@@ -243,8 +251,11 @@ scripts/
 - **Atomic payment writes.** Payment recording, verification, rejection, failure, refund requests and
   refund resolution go through validated security-definer RPCs. Payment status is derived from
   payment and refund records and never changes order fulfilment automatically.
-- **Private image storage.** Product images use a private bucket, signed URLs and business-scoped
-  storage policies.
+- **Atomic storefront writes.** Store profile and product visibility changes use validated RPCs.
+  Anonymous checkout uses a public order RPC that prices from the catalogue, reserves stock through
+  the shared ledger, records idempotency and creates no payment records.
+- **Private image storage.** Product images and store logos use private buckets, signed URLs and
+  business-scoped storage policies.
 - **Lazy routes.** Pages are code-split via `React.lazy` to keep the initial bundle small.
 - **Shared navigation config.** `src/config/navigation.js` drives both the sidebar and the
   header title so routes cannot drift apart.
@@ -289,6 +300,12 @@ scripts/
   and requested refunds reserve refundable value until they are completed or rejected.
 - Payment records cannot change order fulfilment, and order actions cannot change payment status.
   Refund and verification actions are limited to owners, admins and managers.
+- Public storefront reads use scoped security-definer RPCs; anonymous users cannot select stores,
+  storefront idempotency records, products or orders directly.
+- Inactive stores, hidden/draft products and cross-business products are excluded from public reads
+  and checkout. Client-supplied prices are rejected and stock is reserved with row locks.
+- Public images use anon signed URLs only while the product/store is publicly eligible. Store profile
+  changes require owner/admin/manager role and product visibility changes require an active membership.
 - No fake authentication, fake sessions, fake payment gateways or fake production data is implemented.
 
 ## Database (Day 2)
@@ -578,6 +595,53 @@ idempotency, provider-event conflicts, search/filter/sort/pagination, immutable 
 direct-write denial, cross-tenant RLS and cleanup. It runs 199 checks against the linked project and
 cleans up its test users, businesses, payments and refunds.
 
+## Public storefront (Day 9)
+
+Day 9 adds a real public storefront for every business. Full implementation notes, the checkout
+contract, security model and test matrix are in
+[`docs/day9-storefront.md`](docs/day9-storefront.md).
+
+The schema and RPCs are in
+`supabase/migrations/20261121010000_day9_public_storefront.sql`, with the locked stock-reservation
+fix in `supabase/migrations/20261121020000_day9_storefront_stock_reservation_fix.sql`.
+
+**Storefront routes**
+
+| Route | Purpose |
+| --- | --- |
+| `/store/:storeSlug` | Public catalogue with search, categories, sorting and pagination. |
+| `/store/:storeSlug/products/:productId` | Public product detail, variants and add-to-cart. |
+| `/store/:storeSlug/checkout` | Anonymous checkout with server-priced order summary. |
+| `/store` | Workspace store profile, logo, contact details and product visibility. |
+
+**Storefront model**
+
+- Each business gets one store automatically; slugs are unique and stores can be active or inactive.
+- `products.storefront_visible` defaults to `false`; only active, published products are public.
+- Public catalogue queries use active stores only and exclude draft, archived, hidden and
+  cross-business products.
+- Product images and store logos stay in private buckets and are exposed through anon signed URLs
+  only while publicly eligible.
+- Checkout validates customer details and items, rejects client prices, creates a real order in
+  `awaiting_business_approval`, stores delivery details in order notes, reserves tracked stock and
+  logs a `customer_confirmed` event.
+- Checkout idempotency records one response per business/key and returns the original order on retry.
+- No payment is recorded; payment remains `pending` and is handled later through Day 8.
+- Customer links are conservative: only an exact email plus normalized phone match one existing
+  customer in the business.
+
+**Storefront tests**
+
+```powershell
+. .\scripts\load-supabase-db-password.ps1
+npm run test:storefront
+```
+
+The suite exercises store creation and isolation, profile/contact/validation rules, role checks,
+public catalogue filtering, signed private image access, checkout validation, server pricing, stock
+reservation, event logging, idempotency, customer matching, inactive-store blocking and cleanup. It
+runs 110 checks and cleans up its test users, businesses and storage objects.
+
 ## Authentication and onboarding (Day 3)
 
 Day 3 adds a complete auth and workspace-entry flow. Full implementation notes and the test
@@ -660,15 +724,16 @@ but this is an engineering direction, not a claim about current free-tier capaci
 5. Deploy and verify client-side routing and email confirmation links.
 
 `BrowserRouter` requires a rewrite so unknown paths serve `index.html`. `vercel.json` provides the
-catch-all rewrite, so direct links such as `/login` and `/customers` load the app instead of a
-Vercel 404.
+catch-all rewrite, so direct links such as `/login`, `/customers` and `/store/:storeSlug` load the app
+instead of a Vercel 404.
 
 ## Intentionally not built yet
 
-The following are scheduled for later phases and deliberately excluded from Days 1–8:
+The following are scheduled for later phases and deliberately excluded from Days 1–9:
 
 - Purchase orders, suppliers and automated replenishment.
 - Invoices and live payment-provider gateway integrations.
+- Public online payment collection on storefront orders.
 - AI product discovery and AI order extraction.
 - WhatsApp, Instagram or Facebook integrations.
 - Visual/image product search.
@@ -817,6 +882,25 @@ The following are scheduled for later phases and deliberately excluded from Days
 - [x] Day 2 RLS isolation, Day 3 auth, Day 4 catalogue, Day 5 inventory, Day 6 customer, Day 7 order,
   lint and production build still pass.
 - [x] Day 8 migration applied to the linked Supabase project.
+
+## Day 9 acceptance checklist
+
+- [x] Each business automatically gets one validated, unique store record.
+- [x] Store status controls all public reads and checkout access.
+- [x] Store profile, logo and published contact details are managed from the workspace.
+- [x] Product visibility defaults to hidden and is controlled by active members.
+- [x] Public catalogue supports search, categories, sorting, pagination and product detail.
+- [x] Inactive, hidden, draft and cross-business products cannot be viewed or ordered publicly.
+- [x] Product images and store logos remain private and use anon signed URLs when eligible.
+- [x] Anonymous checkout creates real orders in the shared order engine with server prices.
+- [x] Checkout reserves stock through locked inventory rows and the immutable stock ledger.
+- [x] Checkout is idempotent and logs an `Online storefront` customer-confirmed event.
+- [x] Checkout creates no payment records and leaves derived payment status pending.
+- [x] Customer links require an exact email plus normalized phone match.
+- [x] Internal reservation and management RPCs are denied to anonymous and cross-business users.
+- [x] Day 9 storefront/checkout/stock/RLS integration tests pass (110 checks).
+- [x] Day 2 RLS isolation through Day 8, lint and production build still pass.
+- [x] Day 9 storefront and stock-reservation-fix migrations applied to the linked Supabase project.
 
 ## License
 

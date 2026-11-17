@@ -55,6 +55,21 @@ const PaymentDetailPage = lazy(
 const ReportsPage = lazy(() => import('./features/reports/ReportsPage'));
 const TeamPage = lazy(() => import('./features/team/TeamPage'));
 const SettingsPage = lazy(() => import('./features/settings/SettingsPage'));
+const StoreManagementPage = lazy(
+  () => import('./features/storefront/StoreManagementPage'),
+);
+const StorefrontLayout = lazy(
+  () => import('./features/storefront/StorefrontLayout'),
+);
+const PublicStorefrontPage = lazy(
+  () => import('./features/storefront/PublicStorefrontPage'),
+);
+const StorefrontProductPage = lazy(
+  () => import('./features/storefront/StorefrontProductPage'),
+);
+const StorefrontCheckoutPage = lazy(
+  () => import('./features/storefront/StorefrontCheckoutPage'),
+);
 const NotFoundPage = lazy(() => import('./features/not-found/NotFoundPage'));
 
 export default function App() {
@@ -70,6 +85,12 @@ export default function App() {
               <Route path="forgot-password" element={<ForgotPasswordPage />} />
               <Route path="reset-password" element={<ResetPasswordPage />} />
               <Route path="auth/callback" element={<AuthCallbackPage />} />
+            </Route>
+
+            <Route path="store/:storeSlug" element={<StorefrontLayout />}>
+              <Route index element={<PublicStorefrontPage />} />
+              <Route path="products/:productId" element={<StorefrontProductPage />} />
+              <Route path="checkout" element={<StorefrontCheckoutPage />} />
             </Route>
 
             <Route element={<RequireAuth />}>
@@ -135,6 +156,10 @@ export default function App() {
                   />
                   <Route path="reports" element={<ReportsPage />} />
                   <Route path="team" element={<TeamPage />} />
+                  <Route
+                    path="store"
+                    element={<StoreManagementPage />}
+                  />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>

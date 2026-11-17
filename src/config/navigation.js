@@ -7,6 +7,7 @@ import {
   Package,
   Settings,
   ShoppingCart,
+  Store,
   Users,
   UsersRound,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ export const navigationItems = Object.freeze([
   { label: 'Inbox', to: '/inbox', icon: Inbox },
   { label: 'Orders', to: '/orders', icon: ShoppingCart },
   { label: 'Products', to: '/products', icon: Package },
+  { label: 'Online Store', to: '/store', icon: Store },
   { label: 'Inventory', to: '/inventory', icon: Boxes },
   { label: 'Customers', to: '/customers', icon: Users },
   { label: 'Payments', to: '/payments', icon: CreditCard },

@@ -14,7 +14,8 @@
     "test:inventory": "node --env-file=.env.local scripts/day5-inventory-tests.mjs",
     "test:customers": "node --env-file=.env.local scripts/day6-customer-tests.mjs",
     "test:orders": "node --env-file=.env.local scripts/day7-order-tests.mjs",
-    "test:payments": "node --env-file=.env.local scripts/day8-payment-tests.mjs"
+    "test:payments": "node --env-file=.env.local scripts/day8-payment-tests.mjs",
+    "test:storefront": "node --env-file=.env.local scripts/day9-storefront-tests.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
