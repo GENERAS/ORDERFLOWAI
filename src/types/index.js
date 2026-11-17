@@ -55,6 +55,7 @@ export const STOCK_OPERATION = Object.freeze({
 export const ORDER_STATUS = Object.freeze({
   DRAFT: 'draft',
   AWAITING_CONFIRMATION: 'awaiting_confirmation',
+  AWAITING_BUSINESS_APPROVAL: 'awaiting_business_approval',
   CONFIRMED: 'confirmed',
   PROCESSING: 'processing',
   READY: 'ready',
@@ -63,11 +64,25 @@ export const ORDER_STATUS = Object.freeze({
 });
 
 export const PAYMENT_STATUS = Object.freeze({
-  UNPAID: 'unpaid',
+  PENDING: 'pending',
   PARTIALLY_PAID: 'partially_paid',
   PAID: 'paid',
+  FAILED: 'failed',
   REFUNDED: 'refunded',
-  DISPUTED: 'disputed',
+  PARTIALLY_REFUNDED: 'partially_refunded',
+});
+
+export const PAYMENT_RECORD_STATUS = Object.freeze({
+  PENDING: 'pending',
+  VERIFIED: 'verified',
+  REJECTED: 'rejected',
+  FAILED: 'failed',
+});
+
+export const PAYMENT_REFUND_STATUS = Object.freeze({
+  REQUESTED: 'requested',
+  COMPLETED: 'completed',
+  REJECTED: 'rejected',
 });
 
 /**
@@ -302,7 +317,7 @@ export const PAYMENT_STATUS = Object.freeze({
  */
 
 /**
- * @typedef {'draft'|'awaiting_confirmation'|'confirmed'|'processing'|'ready'|'completed'|'cancelled'} OrderStatus
+ * @typedef {'draft'|'awaiting_confirmation'|'awaiting_business_approval'|'confirmed'|'processing'|'ready'|'completed'|'cancelled'} OrderStatus
  */
 
 /**
@@ -314,7 +329,8 @@ export const PAYMENT_STATUS = Object.freeze({
  * @property {string} id
  * @property {string} businessId
  * @property {string} orderNumber
- * @property {string} customerId
+ * @property {string|null} customerId
+ * @property {boolean} isGuest
  * @property {string} customerName
  * @property {string|null} customerPhone
  * @property {string|null} customerEmail
@@ -357,10 +373,120 @@ export const PAYMENT_STATUS = Object.freeze({
  * @property {string} id
  * @property {string} businessId
  * @property {string} orderId
- * @property {'created'|'updated'|'status_changed'|'cancelled'} eventType
+ * @property {'created'|'updated'|'status_changed'|'customer_confirmed'|'business_approved'|'stock_reserved'|'stock_released'|'stock_consumed'|'fulfilled'|'cancelled'} eventType
  * @property {string} summary
  * @property {Object} details
  * @property {string|null} actorId
  * @property {string} actorName
  * @property {string} createdAt
+ */
+
+/**
+ * @typedef {'pending'|'partially_paid'|'paid'|'failed'|'refunded'|'partially_refunded'} PaymentStatus
+ */
+
+/**
+ * @typedef {'pending'|'verified'|'rejected'|'failed'} PaymentRecordStatus
+ */
+
+/**
+ * @typedef {'requested'|'completed'|'rejected'} PaymentRefundStatus
+ */
+
+/**
+ * @typedef {Object} PaymentMethod
+ * @property {string} id
+ * @property {string} code
+ * @property {string} label
+ * @property {boolean} isActive
+ * @property {number} sortOrder
+ */
+
+/**
+ * @typedef {Object} Payment
+ * @property {string} id
+ * @property {string} businessId
+ * @property {string} orderId
+ * @property {string} paymentNumber
+ * @property {string} orderNumber
+ * @property {string} customerName
+ * @property {OrderStatus} orderStatus
+ * @property {number} orderTotal
+ * @property {number} amount
+ * @property {string} currency
+ * @property {string} methodCode
+ * @property {string} methodLabel
+ * @property {PaymentRecordStatus} status
+ * @property {string} paymentDate
+ * @property {string|null} transactionReference
+ * @property {string|null} providerKey
+ * @property {string|null} providerTransactionId
+ * @property {string|null} providerEventId
+ * @property {string|null} notes
+ * @property {string} recordedByName
+ * @property {string|null} verifiedByName
+ * @property {string|null} verifiedAt
+ * @property {string|null} verificationNote
+ * @property {string|null} rejectedByName
+ * @property {string|null} rejectedAt
+ * @property {string|null} rejectionReason
+ * @property {string|null} failedAt
+ * @property {string|null} failureReason
+ * @property {number} refundedAmount
+ * @property {number} requestedRefundAmount
+ * @property {number} refundableAmount
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ * @property {number} totalCount
+ */
+
+/**
+ * @typedef {Object} PaymentRefund
+ * @property {string} id
+ * @property {string} businessId
+ * @property {string} paymentId
+ * @property {number} amount
+ * @property {PaymentRefundStatus} status
+ * @property {string} reason
+ * @property {string|null} reference
+ * @property {string} requestedByName
+ * @property {string} requestedAt
+ * @property {string|null} completedByName
+ * @property {string|null} completedAt
+ * @property {string|null} rejectedByName
+ * @property {string|null} rejectedAt
+ * @property {string|null} rejectionReason
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ */
+
+/**
+ * @typedef {Object} PaymentEvent
+ * @property {string} id
+ * @property {string} businessId
+ * @property {string} paymentId
+ * @property {'created'|'verified'|'rejected'|'failed'|'refund_requested'|'refund_completed'|'refund_rejected'} eventType
+ * @property {string} summary
+ * @property {Object} details
+ * @property {string} actorName
+ * @property {string} createdAt
+ */
+
+/**
+ * @typedef {Object} OrderPaymentSummary
+ * @property {string|null} orderId
+ * @property {string|null} orderNumber
+ * @property {string} currency
+ * @property {number} orderTotal
+ * @property {number} verifiedAmount
+ * @property {number} refundedAmount
+ * @property {number} netPaid
+ * @property {number} balanceDue
+ * @property {number} pendingAmount
+ * @property {number} pendingCount
+ * @property {number} failedAmount
+ * @property {number} requestedRefundAmount
+ * @property {PaymentStatus} paymentStatus
+ * @property {number} paymentCount
+ * @property {string|null} lastPaymentAt
  */

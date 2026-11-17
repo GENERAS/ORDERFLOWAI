@@ -80,6 +80,8 @@ export default function OrderEditorPage() {
   const initialCustomerId = searchParams.get('customerId');
 
   const [customer, setCustomer] = useState(null);
+  const [customerMode, setCustomerMode] = useState('customer');
+  const [guest, setGuest] = useState({ name: '', phone: '', email: '' });
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState([]);
   const [order, setOrder] = useState(null);
@@ -123,13 +125,24 @@ export default function OrderEditorPage() {
         }
 
         setOrder(result.order);
-        setCustomer({
-          id: result.order.customerId,
-          fullName: result.order.customerName,
-          companyName: null,
-          email: result.order.customerEmail,
-          phone: result.order.customerPhone,
-        });
+        if (result.order.customerId) {
+          setCustomerMode('customer');
+          setCustomer({
+            id: result.order.customerId,
+            fullName: result.order.customerName,
+            companyName: null,
+            email: result.order.customerEmail,
+            phone: result.order.customerPhone,
+          });
+        } else {
+          setCustomerMode('guest');
+          setCustomer(null);
+          setGuest({
+            name: result.order.customerName ?? '',
+            phone: result.order.customerPhone ?? '',
+            email: result.order.customerEmail ?? '',
+          });
+        }
         setNotes(result.order.notes ?? '');
         setItems(result.items.map(itemFromOrder));
         setError('');
@@ -183,8 +196,12 @@ export default function OrderEditorPage() {
     event.preventDefault();
     setError('');
 
-    if (!customer?.id) {
+    if (customerMode === 'customer' && !customer?.id) {
       setError('Choose a customer for this order.');
+      return;
+    }
+    if (customerMode === 'guest' && !guest.name.trim()) {
+      setError('Enter the walk-in customer name.');
       return;
     }
     if (items.length === 0) {
@@ -194,13 +211,8 @@ export default function OrderEditorPage() {
 
     for (const item of items) {
       const quantity = Number(item.quantity);
-      const price = Number(item.unitPrice);
       if (!Number.isInteger(quantity) || quantity < 1) {
         setError(`Enter a whole quantity for ${getOrderItemLabel(item)}.`);
-        return;
-      }
-      if (!Number.isFinite(price) || price < 0) {
-        setError(`Enter a valid agreed price for ${getOrderItemLabel(item)}.`);
         return;
       }
     }
@@ -210,13 +222,15 @@ export default function OrderEditorPage() {
     try {
       const payload = {
         businessId,
-        customerId: customer.id,
+        customerId: customerMode === 'customer' ? customer.id : null,
+        guestName: customerMode === 'guest' ? guest.name : '',
+        guestPhone: customerMode === 'guest' ? guest.phone : '',
+        guestEmail: customerMode === 'guest' ? guest.email : '',
         notes,
         items: items.map((item) => ({
           productId: item.productId,
           variantId: item.variantId,
           quantity: Number(item.quantity),
-          unitPrice: Number(item.unitPrice),
         })),
       };
 
@@ -267,7 +281,7 @@ export default function OrderEditorPage() {
         </Link>
         <Alert variant="error">
           {error ||
-            'Only draft or awaiting orders can be edited. Cancel the order to make changes after confirmation.'}
+            'Only draft or awaiting confirmation orders can be edited. Cancel the order to make changes after business approval.'}
         </Alert>
       </section>
     );
@@ -293,9 +307,10 @@ export default function OrderEditorPage() {
               {isNew ? 'New order' : `Edit ${order?.orderNumber ?? 'order'}`}
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-500">
-              Choose the customer, add catalogue items and record the price you
-              agreed. Prices are stored on the order, so later catalogue price
-              changes do not rewrite this agreement.
+              Link an existing customer or record a walk-in customer, then add
+              catalogue items. Unit prices are calculated by the server and
+              snapshotted on the order, so later catalogue changes do not rewrite
+              this price snapshot.
             </p>
           </div>
           <Badge variant="neutral">{activeBusiness?.name}</Badge>
@@ -312,20 +327,91 @@ export default function OrderEditorPage() {
                 <div>
                   <CardTitle>Customer and notes</CardTitle>
                   <CardDescription>
-                    Every order belongs to a customer record so purchase history
-                    stays connected.
+                    Link an existing customer for purchase history, or use a
+                    walk-in customer without creating a fake record.
                   </CardDescription>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <CustomerPicker
-                  businessId={businessId}
-                  selectedCustomer={customer}
-                  onSelect={(selected) => {
-                    setCustomer(selected);
-                    setError('');
-                  }}
-                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant={customerMode === 'customer' ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => {
+                      setCustomerMode('customer');
+                      setError('');
+                    }}
+                  >
+                    Existing customer
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={customerMode === 'guest' ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => {
+                      setCustomerMode('guest');
+                      setCustomer(null);
+                      setError('');
+                    }}
+                  >
+                    Walk-in customer
+                  </Button>
+                </div>
+
+                {customerMode === 'customer' ? (
+                  <CustomerPicker
+                    businessId={businessId}
+                    selectedCustomer={customer}
+                    onSelect={(selected) => {
+                      setCustomer(selected);
+                      setError('');
+                    }}
+                  />
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField
+                      id="order-guest-name"
+                      label="Customer name"
+                      value={guest.name}
+                      maxLength={160}
+                      placeholder="Walk-in customer"
+                      onChange={(event) =>
+                        setGuest((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                    />
+                    <FormField
+                      id="order-guest-phone"
+                      label="Phone (optional)"
+                      type="tel"
+                      value={guest.phone}
+                      maxLength={32}
+                      onChange={(event) =>
+                        setGuest((current) => ({
+                          ...current,
+                          phone: event.target.value,
+                        }))
+                      }
+                    />
+                    <FormField
+                      id="order-guest-email"
+                      label="Email (optional)"
+                      type="email"
+                      value={guest.email}
+                      maxLength={254}
+                      onChange={(event) =>
+                        setGuest((current) => ({
+                          ...current,
+                          email: event.target.value,
+                        }))
+                      }
+                      className="sm:col-span-2"
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label
@@ -340,7 +426,7 @@ export default function OrderEditorPage() {
                     onChange={(event) => setNotes(event.target.value)}
                     rows={3}
                     maxLength={2000}
-                    placeholder="Delivery instructions, agreed discount context or anything the team should know."
+                    placeholder="Delivery instructions, customer requests or anything the team should know."
                     className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
                   />
                 </div>
@@ -352,8 +438,8 @@ export default function OrderEditorPage() {
                 <div>
                   <CardTitle>Order items</CardTitle>
                   <CardDescription>
-                    Add active products or variants. You can adjust quantity and
-                    agreed price for each item.
+                    Add active products or variants and set quantities. The
+                    server applies the catalogue price for each unit.
                   </CardDescription>
                 </div>
                 <Badge variant="neutral">
@@ -431,21 +517,17 @@ export default function OrderEditorPage() {
                                 )
                               }
                             />
-                            <FormField
-                              id={`price-${item.key}`}
-                              label="Agreed unit price"
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={item.unitPrice}
-                              onChange={(event) =>
-                                updateItem(
-                                  item.key,
-                                  'unitPrice',
-                                  event.target.value,
-                                )
-                              }
-                            />
+                            <div>
+                              <p className="text-sm font-medium text-slate-700">
+                                Catalogue unit price
+                              </p>
+                              <p className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+                                {formatCurrency(item.unitPrice, {
+                                  currency:
+                                    order?.currency ?? activeBusiness?.currency,
+                                })}
+                              </p>
+                            </div>
                             <div className="pb-1 text-right">
                               <p className="text-xs text-slate-400">
                                 Line total
@@ -472,7 +554,8 @@ export default function OrderEditorPage() {
                 <div>
                   <CardTitle>Summary</CardTitle>
                   <CardDescription>
-                    Totals are recalculated from the agreed prices.
+                    Preview only. The server recalculates totals from catalogue
+                    prices when saving.
                   </CardDescription>
                 </div>
               </CardHeader>
@@ -514,7 +597,7 @@ export default function OrderEditorPage() {
                       className="mt-0.5 h-3.5 w-3.5 shrink-0"
                       aria-hidden="true"
                     />
-                    Confirming the order reserves tracked stock. Completing it
+                    Business approval reserves tracked stock. Fulfilment
                     consumes that stock, while cancelling releases it.
                   </p>
                 </div>

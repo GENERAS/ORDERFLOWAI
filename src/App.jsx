@@ -46,6 +46,12 @@ const CustomerDetailPage = lazy(
   () => import('./features/customers/CustomerDetailPage'),
 );
 const PaymentsPage = lazy(() => import('./features/payments/PaymentsPage'));
+const RecordPaymentPage = lazy(
+  () => import('./features/payments/RecordPaymentPage'),
+);
+const PaymentDetailPage = lazy(
+  () => import('./features/payments/PaymentDetailPage'),
+);
 const ReportsPage = lazy(() => import('./features/reports/ReportsPage'));
 const TeamPage = lazy(() => import('./features/team/TeamPage'));
 const SettingsPage = lazy(() => import('./features/settings/SettingsPage'));
@@ -122,6 +128,11 @@ export default function App() {
                     element={<CustomerEditorPage />}
                   />
                   <Route path="payments" element={<PaymentsPage />} />
+                  <Route path="payments/new" element={<RecordPaymentPage />} />
+                  <Route
+                    path="payments/:paymentId"
+                    element={<PaymentDetailPage />}
+                  />
                   <Route path="reports" element={<ReportsPage />} />
                   <Route path="team" element={<TeamPage />} />
                   <Route path="settings" element={<SettingsPage />} />

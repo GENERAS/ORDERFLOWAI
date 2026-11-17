@@ -4,12 +4,13 @@ AI-powered product discovery and order automation for businesses. OrderFlow AI c
 customer conversations to a business's real product catalogue, order records, inventory and
 payments through a single multi-tenant SaaS workspace.
 
-> **Current status: Day 7 — order management.**
+> **Current status: Day 8 — payment management.**
 > The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
 > a real product catalogue, live inventory with physical, reserved and available stock,
-> customer profiles with status, tags, note history, activity and duplicate overrides, and orders
-> with agreed prices, activity history, lifecycle rules and automatic stock reservations. Payments
-> and AI remain later phases.
+> customer profiles with status, tags, note history, activity and duplicate overrides, orders
+> with server-authoritative prices, guest checkout, customer/business confirmation, activity history,
+> lifecycle rules and automatic stock reservations, and independent payment tracking with partial
+> payments, verification, refunds, payment history and currency-aware reporting. AI remains a later phase.
 
 ## What is included in this build
 
@@ -46,11 +47,18 @@ payments through a single multi-tenant SaaS workspace.
 - Append-only note history and a read-only activity timeline.
 - Customer list, create/edit forms, customer detail, note composer, address dialog and recent order
   history.
-- Order list with live metrics, search, status filters, sorting and pagination.
-- Order editor with customer selection, catalogue search, variants, quantities and agreed prices.
-- Order detail page with status actions, reservation state, totals, activity history and cancellation.
-- Per-business sequential order numbers and preserved customer/catalogue snapshots.
-- Strict order lifecycle with automatic reservation, release and stock consumption.
+- Order list with live metrics, search, status/date filters, sorting and pagination.
+- Order editor with linked-customer or walk-in mode, catalogue search, variants, quantities and
+  read-only server pricing.
+- Order detail page with role-aware status actions, reservation state, totals, activity history and
+  cancellation.
+- Per-business sequential order numbers and preserved customer/guest/catalogue snapshots.
+- Strict order lifecycle with customer confirmation, business approval, automatic reservation,
+  release and stock consumption.
+- Payment overview, searchable payment directory, payment detail, partial payments, verification,
+  rejection, failure handling, refund requests, refund resolution and immutable payment history.
+- Currency-aware payment metrics and derived order payment status independent of order fulfilment.
+- Default per-business payment methods, sequential payment numbers and idempotent payment/refund RPCs.
 - Reusable paginated data-access layer with normalised errors and a retry helper.
 - Shared domain constants and JSDoc types for future features.
 - ESLint configuration, auth/catalogue/inventory/customer/order integration tests and a documented
@@ -122,6 +130,7 @@ data-backed feature will remain unavailable until credentials are added.
 | `npm run test:inventory` | Run Day 5 inventory balance, ledger, concurrency and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:customers` | Run Day 6 customer profile, status/tag, note, activity, duplicate, address and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:orders` | Run Day 7 order lifecycle, stock, numbering, snapshot and RLS integration tests (requires `.env.local` and the DB password) |
+| `npm run test:payments` | Run Day 8 payment, refund, reporting, numbering, idempotency and RLS integration tests (requires `.env.local` and the DB password) |
 
 ## Environment variables
 
@@ -176,7 +185,7 @@ src/
     products/                 Catalogue list, product editor, taxonomy pages, services and helpers
     inventory/                Stock dashboard, item detail, ledger, services and helpers
     customers/                Customer list, profile editor, detail, notes, activity, addresses and helpers
-    payments/                 Payments module scaffold
+    payments/                 Payment dashboard, detail, recording, refunds, actions and helpers
     reports/                  Reports module scaffold
     team/                     Team and permissions module scaffold
     settings/                 Business settings module scaffold
@@ -191,6 +200,7 @@ src/
     inventoryService.js       Inventory search, metrics, stock operations and tracking settings
     customerService.js        Customer search, profiles, tags, notes, activity, duplicates and addresses
     orderService.js           Order search, catalogue, creation, editing, status and cancellation
+    paymentService.js         Payment search, summaries, recording, verification, refunds and history
     baseService.js            Paginated data-access layer and retry helper
   types/
     index.js                  Domain constants and JSDoc typedefs
@@ -201,6 +211,7 @@ scripts/
   day5-inventory-tests.mjs    Inventory balance, ledger, concurrency and RLS integration tests
   day6-customer-tests.mjs     Customer profile, status/tag, note, activity, duplicate, address and RLS tests
   day7-order-tests.mjs        Order lifecycle, stock, numbering, snapshot and RLS integration tests
+  day8-payment-tests.mjs      Payment, refund, reporting, numbering, idempotency and RLS integration tests
 ```
 
 ### Architectural rules
@@ -229,6 +240,9 @@ scripts/
 - **Atomic order writes.** Order creation, editing, status changes and cancellation go through
   security-definer RPCs. The database enforces numbering, snapshots, transition rules, totals and
   stock reservation in the same transaction.
+- **Atomic payment writes.** Payment recording, verification, rejection, failure, refund requests and
+  refund resolution go through validated security-definer RPCs. Payment status is derived from
+  payment and refund records and never changes order fulfilment automatically.
 - **Private image storage.** Product images use a private bucket, signed URLs and business-scoped
   storage policies.
 - **Lazy routes.** Pages are code-split via `React.lazy` to keep the initial bundle small.
@@ -269,7 +283,13 @@ scripts/
   RPCs, and order activity cannot be updated after it is written.
 - Order numbers are generated atomically per business, and stock can only move through the validated
   inventory ledger during confirmation, cancellation and completion.
-- No fake authentication, fake sessions or fake production data is implemented.
+- Payment tables grant select-only access to active members. Payment, refund and history writes go
+  through security-definer RPCs, with idempotency keys, row locks and immutable events.
+- Only verified payments reduce an order balance. Pending, failed and rejected payments do not count,
+  and requested refunds reserve refundable value until they are completed or rejected.
+- Payment records cannot change order fulfilment, and order actions cannot change payment status.
+  Refund and verification actions are limited to owners, admins and managers.
+- No fake authentication, fake sessions, fake payment gateways or fake production data is implemented.
 
 ## Database (Day 2)
 
@@ -446,35 +466,41 @@ Day 7 turns the Orders placeholder into a real order module with drafts, item pr
 rules, activity history and automatic stock reservations. Full implementation notes and the test
 matrix are in [`docs/day7-orders.md`](docs/day7-orders.md).
 
-The schema and RPCs are in `supabase/migrations/20261117010000_day7_order_management.sql`.
+The schema and RPCs are in `supabase/migrations/20261117010000_day7_order_management.sql`, with the
+lifecycle, guest-order and server-pricing hardening in
+`supabase/migrations/20261119010000_day7_order_lifecycle_guests.sql`.
 
 **Order routes**
 
 | Route | Purpose |
 | --- | --- |
-| `/orders` | Order list with metrics, search, status filters, sorting and pagination. |
+| `/orders` | Order list with metrics, search, status/date filters, sorting and pagination. |
 | `/orders/new` | Create an order, optionally prefilled with `?customerId=`. |
 | `/orders/:orderId` | Items, totals, customer, activity, stock state and lifecycle actions. |
 | `/orders/:orderId/edit` | Edit a draft or awaiting order. |
 
 **Order model**
 
-- Orders require a customer from the same business. Customer name, phone and email are snapshotted.
-- Items preserve product, variant and SKU snapshots while storing an agreed unit price. Omitting the
-  price copies the current catalogue price.
+- Orders require a same-business customer or a walk-in guest name. Customer or guest name, phone and
+  email are snapshotted.
+- Items preserve product, variant and SKU snapshots while the server captures the catalogue unit price.
+  Client-supplied price and line-total fields are rejected.
 - Totals are recalculated from line totals by a database trigger.
 - Order numbers use a per-business atomic counter: `ORD-00001`, `ORD-00002`, and so on.
-- Status moves strictly through `draft`, `awaiting_confirmation`, `confirmed`, `processing`, `ready`
-  and `completed`; cancellation is available until completion.
+- Status moves strictly through `draft`, `awaiting_confirmation`, `awaiting_business_approval`,
+  `confirmed`, `processing`, `ready` and `completed`; cancellation is available until completion.
 - Only draft and awaiting orders can be edited. Confirmed orders cannot be changed.
-- Confirmation reserves tracked stock, cancellation releases it, and completion releases then reduces
-  physical stock. Untracked units create no stock movement.
-- Created, updated, status-change and cancellation events form an immutable activity history.
+- Customer confirmation precedes business approval. Business approval reserves tracked stock,
+  cancellation releases it, and fulfilment releases then reduces physical stock. Untracked units
+  create no stock movement.
+- Created, updated, confirmation, approval, stock, fulfilment and cancellation events form an
+  immutable activity history.
 - Customer detail pages show the five most recent orders and link to their detail pages.
 
 **Order roles and RPCs**
 
-- All four active roles can create, edit, advance and cancel orders.
+- All four active roles can create, edit, confirm customer intent, process and cancel orders.
+  Owner, admin and manager roles are required for business approval and fulfilment.
 - Order tables are select-only for active members; direct insert/update/delete is denied.
 - `create_order`, `update_order`, `update_order_status` and `cancel_order` perform all writes.
 - `search_orders` powers the list, `search_order_catalogue` powers the editor and
@@ -487,11 +513,70 @@ The schema and RPCs are in `supabase/migrations/20261117010000_day7_order_manage
 npm run test:orders
 ```
 
-The suite exercises numbering and concurrent creation, customer/catalogue snapshots, agreed prices,
-variant rules, validation errors, every legal and illegal status transition, stock reservation,
-cancellation release, completion consumption, activity immutability, direct-write denial,
-search/filter/sort/pagination, overview metrics, role permissions, cross-tenant RLS and cleanup.
-It runs 201 checks against the linked project and cleans up its test users and businesses.
+The suite exercises numbering and concurrent creation, customer/guest/catalogue snapshots,
+server-authoritative pricing, variant rules, validation errors, customer confirmation, business
+approval, every legal and illegal status transition, stock reservation, cancellation release,
+fulfilment consumption, activity immutability, direct-write denial, search/filter/sort/pagination,
+date filters, overview metrics, role permissions, cross-tenant RLS and cleanup.
+It runs 232 checks against the linked project and cleans up its test users and businesses.
+
+## Payment management (Day 8)
+
+Day 8 turns the Payments placeholder into a real payment module with partial payments, verification,
+refunds, audit history and currency-aware reporting. Full implementation notes and the test matrix
+are in [`docs/day8-payments.md`](docs/day8-payments.md).
+
+The schema and RPCs are in
+`supabase/migrations/20261120010000_day8_payment_management.sql`.
+
+**Payment routes**
+
+| Route | Purpose |
+| --- | --- |
+| `/payments` | Metrics, search, status/method/date filters, sorting and paginated payment directory. |
+| `/payments/new` | Record a payment against a payable order, optionally prefilled with `?orderId=`. |
+| `/payments/:paymentId` | Payment details, order summary, verification actions, refunds and event history. |
+
+**Payment model**
+
+- Payment records use `pending`, `verified`, `rejected` and `failed`. Only `verified` records count
+  toward the order balance.
+- Order payment status is derived as `pending`, `partially_paid`, `paid`, `failed`, `refunded` or
+  `partially_refunded`; order fulfilment status remains independent.
+- Payments are allowed only for `confirmed`, `processing`, `ready` and `completed` orders.
+- Amounts are positive, limited to two decimals and cannot exceed the outstanding verified balance.
+- Payment numbers use a per-business atomic counter: `PAY-00001`, `PAY-00002`, and so on.
+- Default methods are cash, bank transfer, mobile money, card and other, seeded per business.
+- Refunds use `requested`, `completed` and `rejected`. Requested refunds reserve refundable value;
+  completed refunds reduce net paid; rejected refunds release the reservation.
+- Idempotency keys prevent duplicate payments and refunds, and provider event IDs are unique per
+  business/provider pair.
+- Created, verified, rejected, failed, refund-requested, refund-completed and refund-rejected events
+  form an immutable payment history.
+
+**Payment roles and RPCs**
+
+- All active roles can record payments and request refunds.
+- Owners, admins and managers can verify, reject or fail payments and complete or reject refunds.
+- Payment tables are select-only for active members; direct insert/update/delete is denied.
+- `record_payment`, `verify_payment`, `reject_payment`, `fail_payment`, `request_refund`,
+  `complete_refund` and `reject_refund` perform all writes.
+- `search_payments`, `get_payment`, `get_order_payment_summary`, `search_payable_orders`,
+  `get_payment_overview` and `list_payment_methods` power reads and reporting.
+
+**Payment tests**
+
+```powershell
+. .\scripts\load-supabase-db-password.ps1
+npm run test:payments
+```
+
+The suite exercises method seeding and isolation, payable-order rules, validation limits, partial
+payments, verification and failure flows, role permissions, refund reservations and resolution,
+order/payment status separation, currency-aware overview metrics, payable-order filtering, numbering,
+idempotency, provider-event conflicts, search/filter/sort/pagination, immutable history,
+direct-write denial, cross-tenant RLS and cleanup. It runs 199 checks against the linked project and
+cleans up its test users, businesses, payments and refunds.
 
 ## Authentication and onboarding (Day 3)
 
@@ -580,10 +665,10 @@ Vercel 404.
 
 ## Intentionally not built yet
 
-The following are scheduled for later phases and deliberately excluded from Days 1–7:
+The following are scheduled for later phases and deliberately excluded from Days 1–8:
 
 - Purchase orders, suppliers and automated replenishment.
-- Payments, invoices and payment-provider workflows.
+- Invoices and live payment-provider gateway integrations.
 - AI product discovery and AI order extraction.
 - WhatsApp, Instagram or Facebook integrations.
 - Visual/image product search.
@@ -695,22 +780,43 @@ The following are scheduled for later phases and deliberately excluded from Days
 
 - [x] Order counter, order, item and activity tables with constraints and indexes defined.
 - [x] Per-business sequential order numbers generated atomically.
-- [x] Required same-business customer with preserved customer snapshots.
-- [x] Catalogue item snapshots, agreed prices and generated line totals.
+- [x] Same-business customer or walk-in guest with preserved contact snapshots.
+- [x] Catalogue item snapshots, server-authoritative prices and generated line totals.
 - [x] Automatic order total recalculation.
-- [x] Strict forward-only lifecycle and reason-based cancellation.
+- [x] Strict forward-only lifecycle with customer confirmation, business approval and reason-based cancellation.
 - [x] Editing limited to draft and awaiting orders.
-- [x] Stock reservation on confirmation, release on cancellation and consumption on completion.
-- [x] Immutable, append-only activity history with actor snapshots.
+- [x] Stock reservation on business approval, release on cancellation and consumption on fulfilment.
+- [x] Immutable, append-only activity history with actor, approval and stock events.
 - [x] Row Level Security and select-only client access for all order tables.
 - [x] Atomic order creation, editing, status and cancellation RPCs.
-- [x] Server-side order search, filters, sorting, pagination and overview metrics.
+- [x] Server-side order search, status/customer/date filters, sorting, pagination and overview metrics.
 - [x] Order list, create/edit editor, detail page and cancellation dialog implemented.
 - [x] Customer detail page shows real recent order history.
 - [x] Day 7 order/lifecycle/stock/RLS integration tests pass.
 - [x] Day 2 RLS isolation, Day 3 auth, Day 4 catalogue, Day 5 inventory, Day 6 customer, lint and
   production build still pass.
 - [x] Day 7 migration applied to the linked Supabase project.
+
+## Day 8 acceptance checklist
+
+- [x] Payment methods, counters, payments, refunds and immutable payment-event tables defined.
+- [x] Default payment methods seeded for existing and new businesses.
+- [x] Row Level Security, select-only client grants and active-membership access enforced.
+- [x] Per-business sequential payment numbers generated atomically.
+- [x] Payment record statuses and derived order payment statuses implemented separately from fulfilment.
+- [x] Only verified payments reduce balances; pending, failed and rejected records are excluded.
+- [x] Partial payments, verification, rejection and failure flows implemented.
+- [x] Refund requests, completion and rejection with reserved/completed value tracking implemented.
+- [x] Payment and refund idempotency, provider-event uniqueness and row locking enforced.
+- [x] Atomic payment and refund RPCs with role checks and validated amounts, reasons and metadata.
+- [x] Server-side payment search, filters, sorting, pagination, payable-order search and overview metrics.
+- [x] Currency-aware payment metrics and reporting.
+- [x] Payment directory, record-payment form, payment detail, order payment summary and action dialogs implemented.
+- [x] Payment history is append-only and direct client writes are denied.
+- [x] Day 8 payment/refund/reporting/RLS integration tests pass (199 checks).
+- [x] Day 2 RLS isolation, Day 3 auth, Day 4 catalogue, Day 5 inventory, Day 6 customer, Day 7 order,
+  lint and production build still pass.
+- [x] Day 8 migration applied to the linked Supabase project.
 
 ## License
 

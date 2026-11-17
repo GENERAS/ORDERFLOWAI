@@ -118,7 +118,8 @@ export function mapOrder(row) {
     id: row.id,
     businessId: row.business_id,
     orderNumber: row.order_number,
-    customerId: row.customer_id,
+    customerId: row.customer_id ?? null,
+    isGuest: !row.customer_id,
     customerName: row.customer_name,
     customerPhone: row.customer_phone ?? null,
     customerEmail: row.customer_email ?? null,
@@ -196,6 +197,7 @@ export function mapOrderOverview(row) {
       totalOrders: 0,
       draftCount: 0,
       awaitingConfirmationCount: 0,
+      awaitingBusinessApprovalCount: 0,
       confirmedCount: 0,
       processingCount: 0,
       readyCount: 0,
@@ -213,6 +215,9 @@ export function mapOrderOverview(row) {
     awaitingConfirmationCount: Number(
       row.awaiting_confirmation_count ?? 0,
     ),
+    awaitingBusinessApprovalCount: Number(
+      row.awaiting_business_approval_count ?? 0,
+    ),
     confirmedCount: Number(row.confirmed_count ?? 0),
     processingCount: Number(row.processing_count ?? 0),
     readyCount: Number(row.ready_count ?? 0),
@@ -229,10 +234,6 @@ function toItemPayload(items = []) {
     product_id: item.productId,
     variant_id: item.variantId || null,
     quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
-    unit_price:
-      item.unitPrice === '' || item.unitPrice == null
-        ? null
-        : Number(item.unitPrice),
   }));
 }
 
@@ -246,6 +247,8 @@ export async function searchOrders({
   pageSize = DEFAULT_PAGE_SIZE,
   sort = 'recent',
   direction = 'desc',
+  dateFrom = '',
+  dateTo = '',
 } = {}) {
   if (!businessId) throw new OrderServiceError('Select a workspace first.');
 
@@ -264,6 +267,8 @@ export async function searchOrders({
     p_offset: offset,
     p_sort: sort || 'recent',
     p_direction: direction === 'asc' ? 'asc' : 'desc',
+    p_created_from: toNullableText(dateFrom),
+    p_created_to: toNullableText(dateTo),
   });
 
   if (error) throw toOrderServiceError(error);
@@ -373,14 +378,26 @@ export async function searchOrderCatalogue({
   };
 }
 
+function assertOrderCustomer({ customerId, guestName }) {
+  if (customerId) return;
+  if (!String(guestName ?? '').trim()) {
+    throw new OrderServiceError(
+      'Choose a customer or enter the walk-in customer name.',
+    );
+  }
+}
+
 export async function createOrder({
   businessId,
-  customerId,
+  customerId = null,
+  guestName = '',
+  guestPhone = '',
+  guestEmail = '',
   notes = '',
   items = [],
 }) {
   if (!businessId) throw new OrderServiceError('Select a workspace first.');
-  if (!customerId) throw new OrderServiceError('Choose a customer for this order.');
+  assertOrderCustomer({ customerId, guestName });
   if (!Array.isArray(items) || items.length === 0) {
     throw new OrderServiceError('Add at least one item to the order.');
   }
@@ -388,7 +405,10 @@ export async function createOrder({
   const supabase = getClient();
   const { data, error } = await supabase.rpc('create_order', {
     p_business_id: businessId,
-    p_customer_id: customerId,
+    p_customer_id: customerId || null,
+    p_guest_name: toNullableText(guestName),
+    p_guest_phone: toNullableText(guestPhone),
+    p_guest_email: toNullableText(guestEmail),
     p_notes: toNullableText(notes),
     p_items: toItemPayload(items),
   });
@@ -399,12 +419,15 @@ export async function createOrder({
 
 export async function updateOrder({
   orderId,
-  customerId,
+  customerId = null,
+  guestName = '',
+  guestPhone = '',
+  guestEmail = '',
   notes = '',
   items = [],
 }) {
   if (!orderId) throw new OrderServiceError('Order not found.');
-  if (!customerId) throw new OrderServiceError('Choose a customer for this order.');
+  assertOrderCustomer({ customerId, guestName });
   if (!Array.isArray(items) || items.length === 0) {
     throw new OrderServiceError('Add at least one item to the order.');
   }
@@ -412,7 +435,10 @@ export async function updateOrder({
   const supabase = getClient();
   const { data, error } = await supabase.rpc('update_order', {
     p_order_id: orderId,
-    p_customer_id: customerId,
+    p_customer_id: customerId || null,
+    p_guest_name: toNullableText(guestName),
+    p_guest_phone: toNullableText(guestPhone),
+    p_guest_email: toNullableText(guestEmail),
     p_notes: toNullableText(notes),
     p_items: toItemPayload(items),
   });

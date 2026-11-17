@@ -61,6 +61,8 @@ export default function OrdersPage() {
     status: '',
     sort: 'recent',
     direction: 'desc',
+    dateFrom: '',
+    dateTo: '',
   });
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -112,6 +114,8 @@ export default function OrdersPage() {
       pageSize: ORDER_PAGE_SIZE,
       sort: filters.sort,
       direction: filters.direction,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
     })
       .then((result) => {
         if (!active || requestId !== requestIdRef.current) return;
@@ -136,6 +140,8 @@ export default function OrdersPage() {
     filters.status,
     filters.sort,
     filters.direction,
+    filters.dateFrom,
+    filters.dateTo,
     page,
   ]);
 
@@ -160,6 +166,8 @@ export default function OrdersPage() {
       status: '',
       sort: 'recent',
       direction: 'desc',
+      dateFrom: '',
+      dateTo: '',
     });
     setDebouncedSearch('');
     setPage(1);
@@ -174,6 +182,8 @@ export default function OrdersPage() {
   const hasFilters =
     Boolean(filters.search) ||
     Boolean(filters.status) ||
+    Boolean(filters.dateFrom) ||
+    Boolean(filters.dateTo) ||
     filters.sort !== 'recent' ||
     filters.direction !== 'desc';
   const totalPages = Math.max(1, Math.ceil(total / ORDER_PAGE_SIZE));
@@ -213,8 +223,9 @@ export default function OrdersPage() {
             currency: activeBusiness?.currency,
           })}
           detail={`${formatOrderQuantity(
-            (overview?.draftCount ?? 0) +
+              (overview?.draftCount ?? 0) +
               (overview?.awaitingConfirmationCount ?? 0) +
+              (overview?.awaitingBusinessApprovalCount ?? 0) +
               (overview?.confirmedCount ?? 0) +
               (overview?.processingCount ?? 0) +
               (overview?.readyCount ?? 0),
@@ -223,12 +234,13 @@ export default function OrdersPage() {
           tone="brand"
         />
         <OverviewCard
-          label="Awaiting confirmation"
+          label="Awaiting action"
           value={formatOrderQuantity(
             (overview?.draftCount ?? 0) +
-              (overview?.awaitingConfirmationCount ?? 0),
+              (overview?.awaitingConfirmationCount ?? 0) +
+              (overview?.awaitingBusinessApprovalCount ?? 0),
           )}
-          detail="Draft or waiting for the customer"
+          detail="Draft, customer confirmation or business approval"
           icon={Timer}
           tone="amber"
         />
@@ -244,7 +256,7 @@ export default function OrdersPage() {
           tone="emerald"
         />
         <OverviewCard
-          label="Completed"
+          label="Fulfilled"
           value={formatOrderQuantity(overview?.completedCount ?? 0)}
           detail={`${formatOrderQuantity(
             overview?.ordersToday ?? 0,
@@ -321,6 +333,23 @@ export default function OrdersPage() {
             </Button>
           </div>
         </div>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:max-w-xl">
+          <FormField
+            id="order-date-from"
+            label="Created from"
+            type="date"
+            value={filters.dateFrom}
+            onChange={(event) => updateFilter('dateFrom', event.target.value)}
+          />
+          <FormField
+            id="order-date-to"
+            label="Created to"
+            type="date"
+            value={filters.dateTo}
+            onChange={(event) => updateFilter('dateTo', event.target.value)}
+          />
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -344,7 +373,7 @@ export default function OrdersPage() {
           description={
             hasFilters
               ? 'Clear the filters or try a different search.'
-              : 'Create the first order, add items from the catalogue and agree the final price with the customer.'
+            : 'Create the first order, add items from the catalogue and review the server-calculated total.'
           }
           action={
             hasFilters ? (
@@ -382,6 +411,9 @@ export default function OrdersPage() {
                       <Badge variant={statusBadge.variant}>
                         {statusBadge.label}
                       </Badge>
+                      {order.isGuest ? (
+                        <Badge variant="neutral">Walk-in</Badge>
+                      ) : null}
                       {order.stockState === 'reserved' ? (
                         <Badge variant="brand">Stock reserved</Badge>
                       ) : null}
@@ -444,7 +476,7 @@ export default function OrdersPage() {
 
       <div className="flex items-center gap-2 text-xs text-slate-400">
         <Timer className="h-3.5 w-3.5" aria-hidden="true" />
-        Confirming an order reserves tracked stock. Completing it consumes the
+        Business approval reserves tracked stock. Fulfilment consumes the
         reservation. Cancelling releases any reserved stock.
       </div>
     </section>

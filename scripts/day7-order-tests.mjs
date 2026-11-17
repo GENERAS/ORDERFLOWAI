@@ -225,22 +225,46 @@ async function stock(client, itemId, operation, quantityChange, options = {}) {
   return { movement: unwrapRpc(data), error };
 }
 
-async function createOrder(client, businessId, customerId, items, notes = null) {
+function withoutClientPrices(items) {
+  return items.map(({ unit_price, unitPrice, line_total, ...item }) => item);
+}
+
+async function createOrder(
+  client,
+  businessId,
+  customerId,
+  items,
+  notes = null,
+  guest = {},
+) {
   const { data, error } = await client.rpc('create_order', {
     p_business_id: businessId,
     p_customer_id: customerId,
+    p_guest_name: guest.name ?? null,
+    p_guest_phone: guest.phone ?? null,
+    p_guest_email: guest.email ?? null,
     p_notes: notes,
-    p_items: items,
+    p_items: withoutClientPrices(items),
   });
   return { order: unwrapRpc(data), error };
 }
 
-async function updateOrder(client, orderId, customerId, items, notes = null) {
+async function updateOrder(
+  client,
+  orderId,
+  customerId,
+  items,
+  notes = null,
+  guest = {},
+) {
   const { data, error } = await client.rpc('update_order', {
     p_order_id: orderId,
     p_customer_id: customerId,
+    p_guest_name: guest.name ?? null,
+    p_guest_phone: guest.phone ?? null,
+    p_guest_email: guest.email ?? null,
     p_notes: notes,
-    p_items: items,
+    p_items: withoutClientPrices(items),
   });
   return { order: unwrapRpc(data), error };
 }
@@ -272,6 +296,8 @@ async function searchOrders(client, businessId, options = {}) {
     p_offset: options.offset ?? 0,
     p_sort: options.sort ?? 'recent',
     p_direction: options.direction ?? 'desc',
+    p_created_from: options.dateFrom ?? null,
+    p_created_to: options.dateTo ?? null,
   });
   return { rows: data ?? [], error };
 }
@@ -685,21 +711,21 @@ try {
   checkEqual('order stores the customer phone snapshot', first.customer_phone_snapshot, alicePhone);
   checkEqual('order stores the customer email snapshot', first.customer_email_snapshot, aliceEmail);
   checkEqual('order stores notes', first.notes, 'Deliver after lunch.');
-  checkEqual('order subtotal is calculated from items', Number(first.subtotal), 2300);
-  checkEqual('order total is calculated from items', Number(first.total), 2300);
+  checkEqual('order subtotal is calculated from catalogue prices', Number(first.subtotal), 2500);
+  checkEqual('order total is calculated from catalogue prices', Number(first.total), 2500);
   checkEqual('order records its creator', first.created_by, ownerId);
 
   const firstItems = await orderItems(first.id);
   const firstWidgetItem = firstItems.find((item) => item.product_id === widget.id);
   const firstServiceItem = firstItems.find((item) => item.product_id === service.id);
   checkEqual('order stores both items', firstItems.length, 2);
-  checkEqual('agreed price is preserved', Number(firstWidgetItem?.unit_price), 900);
+  checkEqual('catalogue price is captured on order items', Number(firstWidgetItem?.unit_price), 1000);
   checkEqual(
-    'catalogue price is copied when no agreed price is supplied',
+    'catalogue price is captured for every item type',
     Number(firstServiceItem?.unit_price),
     500,
   );
-  checkEqual('generated line total uses agreed price', Number(firstWidgetItem?.line_total), 1800);
+  checkEqual('generated line total uses catalogue price', Number(firstWidgetItem?.line_total), 2000);
   checkEqual(
     'item product name is snapshotted',
     firstWidgetItem?.product_name_snapshot,
@@ -725,9 +751,9 @@ try {
     (item) => item.product_id === widget.id,
   );
   checkEqual(
-    'changing the catalogue price does not change the agreed order price',
+    'changing the catalogue price does not change the captured order price',
     Number(preservedWidgetItem?.unit_price),
-    900,
+    1000,
   );
   checkEqual(
     'renaming the product does not change the item snapshot',
@@ -782,9 +808,9 @@ try {
     'Bob Order',
   );
   checkEqual(
-    'editing a draft order recalculates totals',
+    'editing a draft order reprices from the current catalogue',
     Number(updateFirst.order?.total),
-    2850,
+    4100,
   );
   checkEqual(
     'editing a draft order replaces the item list',
@@ -813,7 +839,7 @@ try {
   check('owner creates a second order', !secondResult.error, secondResult.error?.message);
   if (!second?.id) throw new Error('Cannot continue without the second order.');
   checkEqual('order numbers increment per business', second.order_number, 'ORD-00002');
-  checkEqual('variant order total includes both items', Number(second.total), 5500);
+  checkEqual('variant order total includes both items', Number(second.total), 4500);
   const secondItems = await orderItems(second.id);
   const secondVariantItem = secondItems.find(
     (item) => item.product_id === shirt.id,
@@ -839,7 +865,43 @@ try {
       unit_price: null,
     },
   ]);
-  checkRpcError('orders require a customer', noCustomer, '22023');
+  checkRpcError('orders require a customer or guest contact', noCustomer, '22023');
+  const manipulatedPrice = await owner.client.rpc('create_order', {
+    p_business_id: businessA,
+    p_customer_id: alice.id,
+    p_notes: null,
+    p_items: [
+      {
+        product_id: widget.id,
+        variant_id: null,
+        quantity: 1,
+        unit_price: 1,
+      },
+    ],
+  });
+  checkRpcError(
+    'clients cannot submit their own order prices',
+    manipulatedPrice,
+    '22023',
+  );
+  const manipulatedLineTotal = await owner.client.rpc('create_order', {
+    p_business_id: businessA,
+    p_customer_id: alice.id,
+    p_notes: null,
+    p_items: [
+      {
+        product_id: widget.id,
+        variant_id: null,
+        quantity: 1,
+        line_total: 1,
+      },
+    ],
+  });
+  checkRpcError(
+    'clients cannot submit their own line totals',
+    manipulatedLineTotal,
+    '22023',
+  );
   const crossCustomer = await createOrder(owner.client, businessA, otherCustomer.id, [
     {
       product_id: widget.id,
@@ -1041,19 +1103,32 @@ try {
   );
   const sameStatus = await setStatus(staff.client, first.id, 'awaiting_confirmation');
   checkRpcError('orders cannot repeat their current status', sameStatus, '22023');
+  const firstCustomerConfirmed = await setStatus(
+    staff.client,
+    first.id,
+    'awaiting_business_approval',
+  );
+  check(
+    'staff can record customer confirmation',
+    !firstCustomerConfirmed.error &&
+      firstCustomerConfirmed.order?.status === 'awaiting_business_approval',
+    firstCustomerConfirmed.error?.message,
+  );
+  const staffApproval = await setStatus(staff.client, first.id, 'confirmed');
+  checkRpcError('staff cannot approve an order for the business', staffApproval, '42501');
   const firstConfirmed = await setStatus(manager.client, first.id, 'confirmed');
   check(
-    'manager can confirm an awaiting order',
+    'manager can approve an awaiting order',
     !firstConfirmed.error && firstConfirmed.order?.status === 'confirmed',
     firstConfirmed.error?.message,
   );
   checkEqual(
-    'confirmation reserves stock',
+    'business approval reserves stock',
     firstConfirmed.order?.stock_state,
     'reserved',
   );
   check(
-    'confirmation records the confirmed timestamp',
+    'business approval records the confirmed timestamp',
     Boolean(firstConfirmed.order?.confirmed_at),
   );
 
@@ -1139,21 +1214,47 @@ try {
   const cancelAgain = await cancelOrder(owner.client, first.id, 'Try cancelling twice.');
   checkRpcError('cancelled orders cannot be cancelled again', cancelAgain, '22023');
   const eventsAfterCancel = await orderEvents(first.id);
-  checkEqual(
+  check(
     'cancellation records an activity event',
-    eventsAfterCancel[eventsAfterCancel.length - 1]?.event_type,
-    'cancelled',
+    eventsAfterCancel.some((event) => event.event_type === 'cancelled'),
+    eventsAfterCancel.map((event) => event.event_type).join(', '),
   );
   checkEqual(
     'status changes are recorded in activity',
     eventsAfterCancel.filter((event) => event.event_type === 'status_changed').length,
-    2,
+    1,
+  );
+  check(
+    'customer confirmation is recorded in activity',
+    eventsAfterCancel.some((event) => event.event_type === 'customer_confirmed'),
+  );
+  check(
+    'business approval is recorded in activity',
+    eventsAfterCancel.some((event) => event.event_type === 'business_approved'),
+  );
+  check(
+    'stock reservation is recorded in activity',
+    eventsAfterCancel.some((event) => event.event_type === 'stock_reserved'),
+  );
+  check(
+    'stock release is recorded in activity',
+    eventsAfterCancel.some((event) => event.event_type === 'stock_released'),
   );
 
   const confirmSecond = await setStatus(owner.client, second.id, 'awaiting_confirmation');
   check('owner can move an order to awaiting confirmation', !confirmSecond.error);
+  const secondCustomerConfirmed = await setStatus(
+    owner.client,
+    second.id,
+    'awaiting_business_approval',
+  );
+  check(
+    'owner can record customer confirmation',
+    !secondCustomerConfirmed.error,
+    secondCustomerConfirmed.error?.message,
+  );
   const secondConfirmed = await setStatus(owner.client, second.id, 'confirmed');
-  check('owner can confirm the variant order', !secondConfirmed.error, secondConfirmed.error?.message);
+  check('owner can approve the variant order', !secondConfirmed.error, secondConfirmed.error?.message);
   const smallAfterReserve = await inventoryRow(shirt.id, smallVariant.id);
   checkEqual('variant confirmation reserves variant stock', smallAfterReserve.reserved_quantity, 2);
   checkEqual('variant confirmation lowers available stock', smallAfterReserve.available_quantity, 8);
@@ -1166,16 +1267,27 @@ try {
   check('confirmed orders move to processing', !processing.error, processing.error?.message);
   const ready = await setStatus(staff.client, second.id, 'ready');
   check('staff can mark an order ready', !ready.error, ready.error?.message);
+  const staffFulfilment = await setStatus(staff.client, second.id, 'completed');
+  checkRpcError('staff cannot fulfil an order', staffFulfilment, '42501');
   const completed = await setStatus(owner.client, second.id, 'completed');
   check(
-    'ready orders can be completed',
+    'ready orders can be fulfilled',
     !completed.error && completed.order?.status === 'completed',
     completed.error?.message,
   );
-  checkEqual('completion marks stock consumed', completed.order?.stock_state, 'consumed');
+  checkEqual('fulfilment marks stock consumed', completed.order?.stock_state, 'consumed');
   check(
-    'completion records the completed timestamp',
+    'fulfilment records the completed timestamp',
     Boolean(completed.order?.completed_at),
+  );
+  const secondEvents = await orderEvents(second.id);
+  check(
+    'fulfilment is recorded in activity',
+    secondEvents.some((event) => event.event_type === 'fulfilled'),
+  );
+  check(
+    'stock consumption is recorded in activity',
+    secondEvents.some((event) => event.event_type === 'stock_consumed'),
   );
   const smallAfterComplete = await inventoryRow(shirt.id, smallVariant.id);
   checkEqual('completion reduces physical inventory', smallAfterComplete.physical_quantity, 8);
@@ -1279,13 +1391,23 @@ try {
     'awaiting_confirmation',
   );
   check('the oversell order can await confirmation', !oversellAwaiting.error);
+  const oversellCustomerConfirmed = await setStatus(
+    owner.client,
+    oversellOrder.id,
+    'awaiting_business_approval',
+  );
+  check(
+    'the oversell order can await business approval',
+    !oversellCustomerConfirmed.error,
+    oversellCustomerConfirmed.error?.message,
+  );
   const oversellConfirm = await setStatus(
     owner.client,
     oversellOrder.id,
     'confirmed',
   );
   checkRpcError(
-    'confirmation fails when tracked stock is insufficient',
+    'business approval fails when tracked stock is insufficient',
     oversellConfirm,
     '22023',
   );
@@ -1293,29 +1415,29 @@ try {
     orderId: oversellOrder.id,
   });
   checkEqual(
-    'a failed confirmation leaves the order awaiting confirmation',
+    'a failed approval leaves the order awaiting business approval',
     oversellAfterFailure.rows[0]?.status,
-    'awaiting_confirmation',
+    'awaiting_business_approval',
   );
   checkEqual(
-    'a failed confirmation leaves stock untouched',
+    'a failed approval leaves stock untouched',
     oversellAfterFailure.rows[0]?.stock_state,
     'none',
   );
   const widgetAfterOversell = await inventoryRow(widget.id);
   checkEqual(
-    'a failed confirmation does not reserve stock',
+    'a failed approval does not reserve stock',
     widgetAfterOversell.reserved_quantity,
     0,
   );
   checkEqual(
-    'a failed confirmation leaves available stock unchanged',
+    'a failed approval leaves available stock unchanged',
     widgetAfterOversell.available_quantity,
     50,
   );
   const oversellItems = await orderItems(oversellOrder.id);
   checkEqual(
-    'a failed confirmation does not mark item reservations',
+    'a failed approval does not mark item reservations',
     oversellItems[0]?.reserved_quantity,
     0,
   );
@@ -1374,7 +1496,7 @@ try {
   checkEqual(
     'order search orders remaining totals after the largest',
     Number(sortedOrders.rows[1]?.total),
-    5500,
+    4500,
   );
   const pagedOrders = await searchOrders(owner.client, businessA, {
     limit: 2,
@@ -1421,13 +1543,111 @@ try {
   checkEqual(
     'order overview totals completed value',
     Number(metrics.value?.completed_value),
-    5500,
+    4500,
   );
   checkEqual(
     'order overview counts orders created today',
     Number(metrics.value?.orders_today),
     7,
   );
+  checkEqual(
+    'order overview counts orders awaiting business approval',
+    Number(metrics.value?.awaiting_business_approval_count),
+    0,
+  );
+
+  const guestResult = await createOrder(
+    owner.client,
+    businessA,
+    null,
+    [
+      {
+        product_id: service.id,
+        variant_id: null,
+        quantity: 1,
+      },
+    ],
+    'Walk-in pickup.',
+    {
+      name: 'Walk-in Guest',
+      phone: '+250788000999',
+      email: 'guest@example.com',
+    },
+  );
+  const guestOrder = guestResult.order;
+  check('walk-in orders can be created without a customer record', !guestResult.error, guestResult.error?.message);
+  checkEqual('walk-in orders keep a null customer id', guestOrder?.customer_id, null);
+  checkEqual('walk-in orders snapshot the guest name', guestOrder?.customer_name_snapshot, 'Walk-in Guest');
+  checkEqual('walk-in orders snapshot the guest phone', guestOrder?.customer_phone_snapshot, '+250788000999');
+  checkEqual('walk-in orders snapshot the guest email', guestOrder?.customer_email_snapshot, 'guest@example.com');
+
+  const guestSearch = await searchOrders(owner.client, businessA, {
+    search: 'walk-in guest',
+  });
+  check(
+    'guest orders are searchable by captured contact name',
+    !guestSearch.error && guestSearch.rows[0]?.id === guestOrder?.id,
+    guestSearch.error?.message,
+  );
+
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const todaySearch = await searchOrders(owner.client, businessA, {
+    dateFrom: today,
+    dateTo: today,
+  });
+  check(
+    'order search filters by creation date',
+    !todaySearch.error &&
+      todaySearch.rows.some((row) => row.id === guestOrder?.id) &&
+      todaySearch.rows.every((row) => row.created_at.slice(0, 10) === today),
+    todaySearch.error?.message,
+  );
+  const pastSearch = await searchOrders(owner.client, businessA, {
+    dateTo: yesterday,
+  });
+  checkEqual(
+    'order search excludes orders outside the date range',
+    pastSearch.rows.length,
+    0,
+  );
+  const invalidDateSearch = await searchOrders(owner.client, businessA, {
+    dateFrom: today,
+    dateTo: yesterday,
+  });
+  checkRpcError(
+    'order search rejects a reversed date range',
+    invalidDateSearch,
+    '22023',
+  );
+
+  const guestUpdate = await updateOrder(
+    owner.client,
+    guestOrder.id,
+    null,
+    [
+      {
+        product_id: service.id,
+        variant_id: null,
+        quantity: 2,
+      },
+    ],
+    null,
+    {
+      name: 'Walk-in Guest Updated',
+      phone: '+250788000999',
+      email: null,
+    },
+  );
+  check('walk-in orders can be edited', !guestUpdate.error, guestUpdate.error?.message);
+  checkEqual(
+    'editing a walk-in order updates the guest snapshot',
+    guestUpdate.order?.customer_name_snapshot,
+    'Walk-in Guest Updated',
+  );
+  checkEqual('walk-in order total uses catalogue price', Number(guestUpdate.order?.total), 1000);
 
   const crossBusinessSearch = await searchOrders(intruder.client, businessA);
   checkRpcError(

@@ -5,7 +5,11 @@ export const ORDER_PAGE_SIZE = 12;
 const STATUS_BADGES = Object.freeze({
   [ORDER_STATUS.DRAFT]: { label: 'Draft', variant: 'neutral' },
   [ORDER_STATUS.AWAITING_CONFIRMATION]: {
-    label: 'Awaiting confirmation',
+    label: 'Awaiting customer confirmation',
+    variant: 'warning',
+  },
+  [ORDER_STATUS.AWAITING_BUSINESS_APPROVAL]: {
+    label: 'Awaiting business approval',
     variant: 'warning',
   },
   [ORDER_STATUS.CONFIRMED]: { label: 'Confirmed', variant: 'brand' },
@@ -17,18 +21,21 @@ const STATUS_BADGES = Object.freeze({
 
 const NEXT_STATUS = Object.freeze({
   [ORDER_STATUS.DRAFT]: ORDER_STATUS.AWAITING_CONFIRMATION,
-  [ORDER_STATUS.AWAITING_CONFIRMATION]: ORDER_STATUS.CONFIRMED,
+  [ORDER_STATUS.AWAITING_CONFIRMATION]:
+    ORDER_STATUS.AWAITING_BUSINESS_APPROVAL,
+  [ORDER_STATUS.AWAITING_BUSINESS_APPROVAL]: ORDER_STATUS.CONFIRMED,
   [ORDER_STATUS.CONFIRMED]: ORDER_STATUS.PROCESSING,
   [ORDER_STATUS.PROCESSING]: ORDER_STATUS.READY,
   [ORDER_STATUS.READY]: ORDER_STATUS.COMPLETED,
 });
 
 const NEXT_ACTION_LABELS = Object.freeze({
-  [ORDER_STATUS.DRAFT]: 'Send for confirmation',
-  [ORDER_STATUS.AWAITING_CONFIRMATION]: 'Confirm order',
+  [ORDER_STATUS.DRAFT]: 'Send for customer confirmation',
+  [ORDER_STATUS.AWAITING_CONFIRMATION]: 'Record customer confirmation',
+  [ORDER_STATUS.AWAITING_BUSINESS_APPROVAL]: 'Approve order',
   [ORDER_STATUS.CONFIRMED]: 'Start processing',
   [ORDER_STATUS.PROCESSING]: 'Mark ready',
-  [ORDER_STATUS.READY]: 'Complete order',
+  [ORDER_STATUS.READY]: 'Mark fulfilled',
 });
 
 export const ORDER_STATUS_OPTIONS = Object.freeze(
@@ -81,6 +88,23 @@ export function isOrderCancellable(status) {
 
 export function canManageOrders(role) {
   return ['owner', 'admin', 'manager', 'staff'].includes(role);
+}
+
+export function canApproveOrders(role) {
+  return ['owner', 'admin', 'manager'].includes(role);
+}
+
+export function getAllowedNextOrderStatus(status, role) {
+  const nextStatus = getNextOrderStatus(status);
+  if (!nextStatus) return null;
+  if (
+    (nextStatus === ORDER_STATUS.CONFIRMED ||
+      nextStatus === ORDER_STATUS.COMPLETED) &&
+    !canApproveOrders(role)
+  ) {
+    return null;
+  }
+  return nextStatus;
 }
 
 export function getOrderItemLabel(item) {

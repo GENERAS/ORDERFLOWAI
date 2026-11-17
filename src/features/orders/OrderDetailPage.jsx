@@ -4,6 +4,7 @@ import {
   CalendarDays,
   CheckCircle2,
   CircleSlash,
+  CreditCard,
   Loader2,
   Mail,
   Pencil,
@@ -30,14 +31,22 @@ import {
   toOrderServiceError,
   updateOrderStatus,
 } from '../../services/orderService';
+import {
+  getOrderPaymentSummary,
+  toPaymentServiceError,
+} from '../../services/paymentService';
 import { formatCurrency, formatDateTime } from '../../utils/format';
 import { useAuth } from '../auth/authContext';
+import {
+  canRecordAgainstOrder,
+  getPaymentStatusBadge,
+} from '../payments/paymentUtils';
 import { CancelOrderDialog } from './components/CancelOrderDialog';
 import {
   canManageOrders,
   formatOrderQuantity,
+  getAllowedNextOrderStatus,
   getNextOrderActionLabel,
-  getNextOrderStatus,
   getOrderItemLabel,
   getOrderStatusBadge,
   getStockStateBadgeVariant,
@@ -50,6 +59,12 @@ const EVENT_LABELS = Object.freeze({
   created: 'Created',
   updated: 'Updated',
   status_changed: 'Status changed',
+  customer_confirmed: 'Customer confirmed',
+  business_approved: 'Business approved',
+  stock_reserved: 'Stock reserved',
+  stock_released: 'Stock released',
+  stock_consumed: 'Stock consumed',
+  fulfilled: 'Fulfilled',
   cancelled: 'Cancelled',
 });
 
@@ -71,6 +86,7 @@ export default function OrderDetailPage() {
   const businessId = activeBusiness?.id;
 
   const [order, setOrder] = useState(null);
+  const [orderSummary, setOrderSummary] = useState(null);
   const [items, setItems] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -105,8 +121,27 @@ export default function OrderDetailPage() {
     };
   }, [businessId, orderId, refreshKey]);
 
+  useEffect(() => {
+    let active = true;
+    if (!businessId || !orderId || !order) return undefined;
+
+    getOrderPaymentSummary(orderId, { currency: order.currency })
+      .then((summary) => {
+        if (active) setOrderSummary(summary);
+      })
+      .catch((loadError) => {
+        if (active) setError(toPaymentServiceError(loadError).message);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [businessId, order, orderId, refreshKey]);
+
+  const role = activeMembership?.role;
+
   const handleAdvance = async () => {
-    const nextStatus = getNextOrderStatus(order?.status);
+    const nextStatus = getAllowedNextOrderStatus(order?.status, role);
     if (!nextStatus) return;
 
     setActing(true);
@@ -154,12 +189,19 @@ export default function OrderDetailPage() {
   }
 
   const statusBadge = getOrderStatusBadge(order.status);
-  const nextStatus = getNextOrderStatus(order.status);
+  const nextStatus = getAllowedNextOrderStatus(order.status, role);
   const nextActionLabel = getNextOrderActionLabel(order.status);
   const editable = isOrderEditable(order.status);
   const cancellable = isOrderCancellable(order.status);
-  const canManage = canManageOrders(activeMembership?.role);
+  const canManage = canManageOrders(role);
   const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
+  const paymentBadge = getPaymentStatusBadge(
+    orderSummary?.paymentStatus ?? 'pending',
+  );
+  const canRecordPayment =
+    canManage &&
+    canRecordAgainstOrder(order.status) &&
+    (orderSummary?.balanceDue ?? 0) > 0;
 
   return (
     <section className="space-y-6" aria-labelledby="order-detail-title">
@@ -187,6 +229,9 @@ export default function OrderDetailPage() {
               >
                 {getStockStateLabel(order.stockState)}
               </Badge>
+              <Badge variant={paymentBadge.variant}>
+                {paymentBadge.label}
+              </Badge>
             </div>
             <p className="mt-2 text-sm text-slate-500">
               Created {formatDateTime(order.createdAt)} -{' '}
@@ -210,6 +255,15 @@ export default function OrderDetailPage() {
                   )}
                   {nextActionLabel}
                 </Button>
+              ) : null}
+              {canRecordPayment ? (
+                <Link
+                  to={`/payments/new?orderId=${order.id}`}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+                >
+                  <CreditCard className="h-4 w-4" aria-hidden="true" />
+                  Record payment
+                </Link>
               ) : null}
               {editable ? (
                 <Link
@@ -257,7 +311,7 @@ export default function OrderDetailPage() {
               <div>
                 <CardTitle>Order items</CardTitle>
                 <CardDescription>
-                  Agreed prices are preserved on this order even if the
+                  Captured unit prices are preserved on this order even if the
                   catalogue changes later.
                 </CardDescription>
               </div>
@@ -392,29 +446,119 @@ export default function OrderDetailPage() {
           <Card>
             <CardHeader>
               <div>
-                <CardTitle>Customer</CardTitle>
+                <CardTitle>Payment</CardTitle>
                 <CardDescription>
-                  Contact details captured when the order was created.
+                  Payment status is tracked separately from fulfilment.
                 </CardDescription>
+              </div>
+              <CreditCard className="h-5 w-5 text-slate-400" aria-hidden="true" />
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={paymentBadge.variant}>{paymentBadge.label}</Badge>
+                <span className="text-xs text-slate-400">
+                  {orderSummary?.paymentCount ?? 0} payment
+                  {orderSummary?.paymentCount === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              <dl className="mt-4 space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Order total</dt>
+                  <dd className="font-medium text-slate-900">
+                    {formatCurrency(order.total, {
+                      currency: order.currency,
+                    })}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Net paid</dt>
+                  <dd className="font-medium text-slate-900">
+                    {formatCurrency(orderSummary?.netPaid ?? 0, {
+                      currency: order.currency,
+                    })}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Balance due</dt>
+                  <dd className="font-semibold text-slate-900">
+                    {formatCurrency(orderSummary?.balanceDue ?? order.total, {
+                      currency: order.currency,
+                    })}
+                  </dd>
+                </div>
+                {(orderSummary?.pendingAmount ?? 0) > 0 ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-amber-700">Pending verification</dt>
+                    <dd className="font-medium text-amber-700">
+                      {formatCurrency(orderSummary.pendingAmount, {
+                        currency: order.currency,
+                      })}
+                    </dd>
+                  </div>
+                ) : null}
+                {(orderSummary?.requestedRefundAmount ?? 0) > 0 ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-amber-700">Refund requested</dt>
+                    <dd className="font-medium text-amber-700">
+                      {formatCurrency(orderSummary.requestedRefundAmount, {
+                        currency: order.currency,
+                      })}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+
+              <Link
+                to="/payments"
+                className="mt-4 inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+              >
+                View payment records
+              </Link>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div>
+                <CardTitle>Customer</CardTitle>
+                  <CardDescription>
+                    Contact details captured when the order was created. Walk-in
+                    orders are not linked to a customer record.
+                  </CardDescription>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Link
-                to={`/customers/${order.customerId}`}
-                className="flex items-center gap-3 rounded-lg p-1 transition-colors hover:bg-slate-50"
-              >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700">
-                  <UserRound className="h-5 w-5" aria-hidden="true" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-semibold text-slate-900">
-                    {order.customerName}
+              {order.customerId ? (
+                <Link
+                  to={`/customers/${order.customerId}`}
+                  className="flex items-center gap-3 rounded-lg p-1 transition-colors hover:bg-slate-50"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700">
+                    <UserRound className="h-5 w-5" aria-hidden="true" />
                   </span>
-                  <span className="text-xs text-brand-700">
-                    View customer record
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-900">
+                      {order.customerName}
+                    </span>
+                    <span className="text-xs text-brand-700">
+                      View customer record
+                    </span>
                   </span>
-                </span>
-              </Link>
+                </Link>
+              ) : (
+                <div className="flex items-center gap-3 rounded-lg p-1">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+                    <UserRound className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-900">
+                      {order.customerName}
+                    </span>
+                    <Badge variant="neutral">Walk-in customer</Badge>
+                  </span>
+                </div>
+              )}
 
               <div className="space-y-2 text-sm">
                 {order.customerEmail ? (
@@ -470,13 +614,13 @@ export default function OrderDetailPage() {
                 />
                 {order.confirmedAt ? (
                   <DetailRow
-                    label="Confirmed"
+                    label="Business approved"
                     value={formatDateTime(order.confirmedAt)}
                   />
                 ) : null}
                 {order.completedAt ? (
                   <DetailRow
-                    label="Completed"
+                    label="Fulfilled"
                     value={formatDateTime(order.completedAt)}
                   />
                 ) : null}
