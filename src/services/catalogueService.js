@@ -1,16 +1,9 @@
 import { getSupabaseClient } from '../lib/supabase/client';
+import mediaStorageManager from './mediaStorageManager';
+import { resolveMediaUrls } from './media/resolveMediaUrls';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './baseService';
 
 const PRODUCT_IMAGE_BUCKET = 'product-images';
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const SIGNED_URL_SECONDS = 60 * 60;
-
-const IMAGE_EXTENSIONS = Object.freeze({
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/avif': 'avif',
-});
 
 const ERROR_MESSAGES = Object.freeze({
   '23503': 'This item is still used by other records and cannot be deleted.',
@@ -205,6 +198,7 @@ function mapImage(row) {
     altText: row.alt_text ?? null,
     sortOrder: row.sort_order ?? 0,
     isPrimary: Boolean(row.is_primary),
+    mediaAssetId: row.media_asset_id ?? null,
     createdAt: row.created_at,
   };
 }
@@ -265,21 +259,7 @@ function toVariantPayload(variants = []) {
 }
 
 async function createSignedUrlMap(paths) {
-  const uniquePaths = [...new Set((paths ?? []).filter(Boolean))];
-  if (uniquePaths.length === 0) return new Map();
-
-  const supabase = getClient();
-  const { data, error } = await supabase.storage
-    .from(PRODUCT_IMAGE_BUCKET)
-    .createSignedUrls(uniquePaths, SIGNED_URL_SECONDS);
-
-  if (error) return new Map();
-
-  return new Map(
-    (data ?? [])
-      .filter((item) => item.signedUrl)
-      .map((item) => [item.path, item.signedUrl]),
-  );
+  return resolveMediaUrls(paths, { bucket: PRODUCT_IMAGE_BUCKET });
 }
 
 export async function listProducts({
@@ -712,85 +692,33 @@ export async function uploadProductImage({
   productId,
   file,
   isPrimary = false,
+  onProgress,
 }) {
-  if (!file) throw new CatalogueServiceError('Choose an image to upload.');
-
-  const extension = IMAGE_EXTENSIONS[file.type];
-  if (!extension) {
-    throw new CatalogueServiceError(
-      'Use a JPEG, PNG, WebP or AVIF image.',
-    );
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    throw new CatalogueServiceError('Images must be 5 MB or smaller.');
-  }
+  const asset = await mediaStorageManager.uploadImage({
+    businessId,
+    productId,
+    category: 'product_image',
+    file,
+    onProgress,
+  });
 
   const supabase = getClient();
-  const storagePath = `${businessId}/${productId}/${crypto.randomUUID()}.${extension}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from(PRODUCT_IMAGE_BUCKET)
-    .upload(storagePath, file, {
-      cacheControl: '3600',
-      contentType: file.type,
-      upsert: false,
-    });
-
-  if (uploadError) throw toCatalogueServiceError(uploadError);
-
-  const { data: existing, error: existingError } = await supabase
-    .from('product_images')
-    .select('id, sort_order, is_primary')
-    .eq('business_id', businessId)
-    .eq('product_id', productId)
-    .order('sort_order', { ascending: false });
-
-  if (existingError) {
-    await supabase.storage.from(PRODUCT_IMAGE_BUCKET).remove([storagePath]);
-    throw toCatalogueServiceError(existingError);
-  }
-
-  const shouldBePrimary = isPrimary || (existing ?? []).length === 0;
-  if (shouldBePrimary && (existing ?? []).some((image) => image.is_primary)) {
-    const { error: clearError } = await supabase
-      .from('product_images')
-      .update({ is_primary: false })
-      .eq('business_id', businessId)
-      .eq('product_id', productId);
-
-    if (clearError) {
-      await supabase.storage.from(PRODUCT_IMAGE_BUCKET).remove([storagePath]);
-      throw toCatalogueServiceError(clearError);
-    }
-  }
-
-  const nextSortOrder =
-    (existing ?? []).reduce(
-      (maximum, image) => Math.max(maximum, image.sort_order ?? 0),
-      -1,
-    ) + 1;
-
-  const { data, error } = await supabase
-    .from('product_images')
-    .insert({
-      business_id: businessId,
-      product_id: productId,
-      storage_path: storagePath,
-      sort_order: nextSortOrder,
-      is_primary: shouldBePrimary,
-    })
-    .select('*')
-    .single();
+  const { data, error } = await supabase.rpc('media_attach_product_image', {
+    p_media_asset_id: asset.id,
+    p_product_id: productId,
+    p_is_primary: Boolean(isPrimary),
+  });
 
   if (error) {
-    await supabase.storage.from(PRODUCT_IMAGE_BUCKET).remove([storagePath]);
+    await mediaStorageManager.deleteImage(asset.id).catch(() => {});
     throw toCatalogueServiceError(error);
   }
 
-  const signedUrls = await createSignedUrlMap([storagePath]);
+  const image = mapImage(unwrapRpc(data));
+  const signedUrls = await createSignedUrlMap([image.storagePath]);
   return {
-    ...mapImage(data),
-    url: signedUrls.get(storagePath) ?? null,
+    ...image,
+    url: signedUrls.get(image.storagePath) ?? null,
   };
 }
 
@@ -848,6 +776,11 @@ export async function deleteProductImage({ businessId, productId, image }) {
     .eq('id', image.id);
 
   if (error) throw toCatalogueServiceError(error);
+
+  if (image.mediaAssetId) {
+    await mediaStorageManager.deleteImage(image.mediaAssetId);
+    return;
+  }
 
   const { error: storageError } = await supabase.storage
     .from(PRODUCT_IMAGE_BUCKET)

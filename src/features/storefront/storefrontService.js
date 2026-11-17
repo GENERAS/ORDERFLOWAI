@@ -1,16 +1,9 @@
 import { getSupabaseClient } from '../../lib/supabase/client';
+import mediaStorageManager from '../../services/mediaStorageManager';
+import { resolveMediaUrls } from '../../services/media/resolveMediaUrls';
 
 const PRODUCT_IMAGE_BUCKET = 'product-images';
 const STORE_LOGO_BUCKET = 'store-logos';
-const SIGNED_URL_SECONDS = 60 * 60;
-
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const IMAGE_EXTENSIONS = Object.freeze({
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/avif': 'avif',
-});
 
 const ERROR_MESSAGES = Object.freeze({
   '22023': 'Some of the submitted details are invalid. Review them and try again.',
@@ -74,21 +67,7 @@ function getClient() {
 }
 
 async function createSignedUrlMap(paths, bucket = PRODUCT_IMAGE_BUCKET) {
-  const uniquePaths = [...new Set((paths ?? []).filter(Boolean))];
-  if (uniquePaths.length === 0) return new Map();
-
-  const supabase = getClient();
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .createSignedUrls(uniquePaths, SIGNED_URL_SECONDS);
-
-  if (error) return new Map();
-
-  return new Map(
-    (data ?? [])
-      .filter((item) => item.signedUrl)
-      .map((item) => [item.path, item.signedUrl]),
-  );
+  return resolveMediaUrls(paths, { bucket });
 }
 
 export async function getPublicStore(storeSlug) {
@@ -102,7 +81,9 @@ export async function getPublicStore(storeSlug) {
   if (!row) throw new StorefrontServiceError('This online store is not available.');
 
   const logoPath = row.logo_path ?? null;
-  const logoUrls = await createSignedUrlMap([logoPath], STORE_LOGO_BUCKET);
+  const logoUrls = row.logo_url
+    ? new Map([[logoPath, row.logo_url]])
+    : await createSignedUrlMap([logoPath], STORE_LOGO_BUCKET);
 
   return {
     slug: row.store_slug,
@@ -170,9 +151,9 @@ export async function searchStorefrontProducts({
       priceFrom: Boolean(row.price_from),
       imagePath: row.primary_image_path ?? null,
       imageAlt: row.primary_image_alt ?? row.name,
-      imageUrl: row.primary_image_path
+      imageUrl: row.primary_image_url || (row.primary_image_path
         ? images.get(row.primary_image_path) ?? null
-        : null,
+        : null),
     })),
     count: Number(rows[0]?.total_count ?? 0),
   };
@@ -217,7 +198,7 @@ export async function getStorefrontProduct({ storeSlug, productId }) {
     images: imageRows.map((image) => ({
       path: image.path,
       alt: image.alt || row.name,
-      url: imageUrls.get(image.path) ?? null,
+      url: image.url || (image.path ? imageUrls.get(image.path) ?? null : null),
     })),
   };
 }
@@ -273,6 +254,8 @@ export function mapStoreProfile(row) {
     name: row.name,
     description: row.description ?? '',
     logoPath: row.logo_path ?? null,
+    logoMediaAssetId: row.logo_media_asset_id ?? null,
+    logoUrl: row.logo_url ?? null,
     contactEmail: row.contact_email ?? '',
     contactPhone: row.contact_phone ?? '',
     contactAddress: row.contact_address ?? '',
@@ -305,6 +288,7 @@ export async function updateStoreProfile({
   showContact = false,
   brandColor = '#4f46e5',
   status = 'active',
+  logoMediaAssetId = null,
 }) {
   const supabase = getClient();
   const { data, error } = await supabase.rpc('update_store_profile', {
@@ -313,6 +297,7 @@ export async function updateStoreProfile({
     p_name: name,
     p_description: toNullableText(description),
     p_logo_path: toNullableText(logoPath),
+    p_logo_media_asset_id: logoMediaAssetId || null,
     p_contact_email: toNullableText(contactEmail),
     p_contact_phone: toNullableText(contactPhone),
     p_contact_address: toNullableText(contactAddress),
@@ -360,9 +345,9 @@ export async function searchStorefrontManagementProducts({
       categoryName: row.category_name ?? null,
       storefrontVisible: Boolean(row.storefront_visible),
       imagePath: row.primary_image_path ?? null,
-      imageUrl: row.primary_image_path
+      imageUrl: row.primary_image_url || (row.primary_image_path
         ? images.get(row.primary_image_path) ?? null
-        : null,
+        : null),
     })),
     count: Number(rows[0]?.total_count ?? 0),
   };
@@ -382,32 +367,27 @@ export async function getStoreLogoUrl(logoPath) {
   return logoPath ? urls.get(logoPath) ?? null : null;
 }
 
-export async function uploadStoreLogo({ businessId, file }) {
-  if (!file) throw new StorefrontServiceError('Choose a logo image.');
-  if (!Object.hasOwn(IMAGE_EXTENSIONS, file.type)) {
-    throw new StorefrontServiceError('Use a JPEG, PNG, WebP or AVIF image.');
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    throw new StorefrontServiceError('Store logos must be 5 MB or smaller.');
-  }
-
-  const extension = IMAGE_EXTENSIONS[file.type];
-  const storagePath = `${businessId}/${crypto.randomUUID()}.${extension}`;
-  const supabase = getClient();
-  const { error } = await supabase.storage
-    .from(STORE_LOGO_BUCKET)
-    .upload(storagePath, file, {
-      cacheControl: '3600',
-      contentType: file.type,
-      upsert: false,
-    });
-
-  if (error) throw toStorefrontServiceError(error);
-  return storagePath;
+export async function uploadStoreLogo({ businessId, file, onProgress }) {
+  const asset = await mediaStorageManager.uploadImage({
+    businessId,
+    category: 'store_logo',
+    file,
+    onProgress,
+  });
+  return {
+    logoPath: asset.providerFileId,
+    mediaAssetId: asset.id,
+    asset,
+  };
 }
 
-export async function deleteStoreLogo(logoPath) {
+export async function deleteStoreLogo(logoPath, mediaAssetId = null) {
+  if (mediaAssetId) {
+    await mediaStorageManager.deleteImage(mediaAssetId);
+    return;
+  }
   if (!logoPath) return;
+
   const supabase = getClient();
   const { error } = await supabase.storage
     .from(STORE_LOGO_BUCKET)

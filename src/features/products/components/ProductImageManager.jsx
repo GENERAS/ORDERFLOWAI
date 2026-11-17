@@ -4,6 +4,7 @@ import {
   ArrowUp,
   ImagePlus,
   Loader2,
+  RefreshCw,
   Star,
   Trash2,
 } from 'lucide-react';
@@ -23,11 +24,14 @@ export function ProductImageManager({ businessId, productId }) {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [replaceTargetId, setReplaceTargetId] = useState(null);
   const [workingId, setWorkingId] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [altDrafts, setAltDrafts] = useState({});
   const fileInputRef = useRef(null);
+  const replaceInputRef = useRef(null);
 
   const loadImages = async () => {
     const rows = await listProductImages({ businessId, productId });
@@ -68,16 +72,18 @@ export function ProductImageManager({ businessId, productId }) {
     if (files.length === 0) return;
 
     setUploading(true);
+    setUploadProgress(0);
     setError('');
     setSuccess('');
 
     try {
-      for (const file of files) {
+      for (const [index, file] of files.entries()) {
         await uploadProductImage({
           businessId,
           productId,
           file,
-          isPrimary: images.length === 0 && file === files[0],
+          isPrimary: images.length === 0 && index === 0,
+          onProgress: (progress) => setUploadProgress(progress),
         });
       }
       await loadImages();
@@ -89,7 +95,48 @@ export function ProductImageManager({ businessId, productId }) {
       await loadImages().catch(() => {});
     } finally {
       setUploading(false);
+      setUploadProgress(0);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleReplaceClick = (image) => {
+    setReplaceTargetId(image.id);
+    replaceInputRef.current?.click();
+  };
+
+  const handleReplace = async (event) => {
+    const file = event.target.files?.[0] ?? null;
+    const target = images.find((image) => image.id === replaceTargetId);
+    if (!file || !target) {
+      event.target.value = '';
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress(0);
+    setError('');
+    setSuccess('');
+
+    try {
+      await uploadProductImage({
+        businessId,
+        productId,
+        file,
+        isPrimary: target.isPrimary,
+        onProgress: (progress) => setUploadProgress(progress),
+      });
+      await deleteProductImage({ businessId, productId, image: target });
+      await loadImages();
+      setSuccess('Image replaced.');
+    } catch (replaceError) {
+      setError(toCatalogueServiceError(replaceError).message);
+      await loadImages().catch(() => {});
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+      setReplaceTargetId(null);
+      event.target.value = '';
     }
   };
 
@@ -217,8 +264,32 @@ export function ProductImageManager({ businessId, productId }) {
             )}
             {uploading ? 'Uploading…' : 'Upload images'}
           </Button>
+          <input
+            ref={replaceInputRef}
+            id="replace-product-image"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/avif"
+            className="sr-only"
+            onChange={handleReplace}
+            disabled={uploading}
+          />
         </div>
       </div>
+
+      {uploading && uploadProgress > 0 ? (
+        <div className="space-y-1" aria-live="polite">
+          <div className="flex justify-between text-xs text-slate-500">
+            <span>Uploading image…</span>
+            <span>{uploadProgress}%</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+            <div
+              className="h-full rounded-full bg-brand-600 transition-[width]"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -306,6 +377,15 @@ export function ProductImageManager({ businessId, productId }) {
                         Make primary
                       </Button>
                     ) : null}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleReplaceClick(image)}
+                      disabled={isWorking || uploading}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      Replace
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Copy,
@@ -8,6 +8,7 @@ import {
   Loader2,
   Package,
   Save,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -16,6 +17,8 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { FormField } from '../../components/ui/FormField';
+import mediaStorageManager from '../../services/mediaStorageManager';
+import { formatMediaBytes } from '../../services/media/mediaErrors';
 import { formatCurrency } from '../../utils/format';
 import { useAuth } from '../auth/authContext';
 import {
@@ -27,7 +30,6 @@ import {
   setStorefrontProductVisibility,
   toStorefrontServiceError,
   updateStoreProfile,
-  uploadStoreLogo,
 } from './storefrontService';
 
 const EMPTY_STORE = {
@@ -50,6 +52,11 @@ export default function StoreManagementPage() {
   const [form, setForm] = useState(EMPTY_STORE);
   const [logoPreview, setLogoPreview] = useState(null);
   const [logoFile, setLogoFile] = useState(null);
+  const [logoProgress, setLogoProgress] = useState(0);
+  const [logoMediaAssetId, setLogoMediaAssetId] = useState(null);
+  const [logoRemoved, setLogoRemoved] = useState(false);
+  const [usage, setUsage] = useState(null);
+  const previewUrlRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -62,6 +69,15 @@ export default function StoreManagementPage() {
   const [productsLoading, setProductsLoading] = useState(true);
   const [productError, setProductError] = useState('');
   const [updatingProductId, setUpdatingProductId] = useState(null);
+
+  const loadUsage = useCallback(async () => {
+    if (!businessId) return;
+    try {
+      setUsage(await mediaStorageManager.getUsage(businessId));
+    } catch {
+      setUsage(null);
+    }
+  }, [businessId]);
 
   const loadProducts = useCallback(async () => {
     if (!businessId) return;
@@ -112,6 +128,7 @@ export default function StoreManagementPage() {
             logoPath: mapped.logoPath ?? '',
           });
           setLogoPreview(preview);
+          setLogoMediaAssetId(mapped.logoMediaAssetId ?? null);
         }
         setError('');
         setLoading(false);
@@ -142,6 +159,17 @@ export default function StoreManagementPage() {
     return () => window.clearTimeout(timeout);
   }, [loadProducts]);
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      loadUsage();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [loadUsage]);
+
+  useEffect(() => () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+  }, []);
+
   const updateField = (field) => (event) => {
     const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
     setForm((current) => ({ ...current, [field]: value }));
@@ -165,7 +193,21 @@ export default function StoreManagementPage() {
   const handleLogoChange = (event) => {
     const file = event.target.files?.[0] ?? null;
     setLogoFile(file);
-    if (file) setLogoPreview(URL.createObjectURL(file));
+    setLogoRemoved(false);
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = null;
+    if (file) {
+      previewUrlRef.current = URL.createObjectURL(file);
+      setLogoPreview(previewUrlRef.current);
+    }
+  };
+
+  const handleRemoveLogo = () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = null;
+    setLogoFile(null);
+    setLogoRemoved(true);
+    setLogoPreview(null);
   };
 
   const handleSave = async (event) => {
@@ -173,26 +215,48 @@ export default function StoreManagementPage() {
     if (!businessId) return;
 
     setSaving(true);
+    setLogoProgress(0);
     setError('');
     setSuccess('');
 
+    let uploadedAsset = null;
+    const previousLogoPath = form.logoPath;
+    const previousMediaAssetId = logoMediaAssetId;
+
     try {
-      let logoPath = form.logoPath || '';
+      let nextLogoPath = logoRemoved ? '' : form.logoPath || '';
+      let nextMediaAssetId = logoRemoved ? null : logoMediaAssetId;
+
       if (logoFile) {
-        logoPath = await uploadStoreLogo({ businessId, file: logoFile });
+        const asset = await mediaStorageManager.uploadImage({
+          businessId,
+          category: 'store_logo',
+          file: logoFile,
+          onProgress: setLogoProgress,
+        });
+        uploadedAsset = asset;
+        nextLogoPath = asset.provider === 'cloudinary'
+          ? `cloudinary:${asset.providerFileId}`
+          : asset.providerFileId;
+        nextMediaAssetId = asset.id;
       }
 
       const profile = await updateStoreProfile({
         businessId,
         ...form,
-        logoPath,
+        logoPath: nextLogoPath,
+        logoMediaAssetId: nextMediaAssetId,
       });
 
-      if (logoFile && form.logoPath && form.logoPath !== logoPath) {
-        await deleteStoreLogo(form.logoPath);
+      if (previousLogoPath && (logoFile || logoRemoved) && previousLogoPath !== nextLogoPath) {
+        await deleteStoreLogo(previousLogoPath, previousMediaAssetId);
       }
 
-      const preview = profile.logoPath ? await getStoreLogoUrl(profile.logoPath) : null;
+      let preview = profile.logoUrl ?? null;
+      if (!preview && profile.logoPath) {
+        preview = await getStoreLogoUrl(profile.logoPath).catch(() => null);
+      }
+
       setStore(profile);
       setForm({
         slug: profile.slug,
@@ -206,13 +270,20 @@ export default function StoreManagementPage() {
         status: profile.status,
         logoPath: profile.logoPath ?? '',
       });
+      setLogoMediaAssetId(profile.logoMediaAssetId ?? null);
       setLogoPreview(preview);
       setLogoFile(null);
+      setLogoRemoved(false);
+      await loadUsage();
       setSuccess('Online store settings saved.');
     } catch (saveError) {
+      if (uploadedAsset) {
+        await mediaStorageManager.deleteImage(uploadedAsset.id).catch(() => {});
+      }
       setError(toStorefrontServiceError(saveError).message);
     } finally {
       setSaving(false);
+      setLogoProgress(0);
     }
   };
 
@@ -351,11 +422,39 @@ export default function StoreManagementPage() {
                       onChange={handleLogoChange}
                     />
                   </label>
-                  <p className="mt-1 text-xs text-slate-500">JPEG, PNG, WebP or AVIF up to 5 MB.</p>
-                </div>
-              </div>
-            </div>
-          </div>
+                   <p className="mt-1 text-xs text-slate-500">
+                     JPEG, PNG, WebP or AVIF. Uploads are validated on the server.
+                   </p>
+                   {logoPreview || form.logoPath ? (
+                     <Button
+                       variant="ghost"
+                       size="sm"
+                       className="mt-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                       onClick={handleRemoveLogo}
+                       disabled={saving}
+                     >
+                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                       Remove logo
+                     </Button>
+                   ) : null}
+                 </div>
+               </div>
+               {saving && logoProgress > 0 ? (
+                 <div className="mt-3 space-y-1" aria-live="polite">
+                   <div className="flex justify-between text-xs text-slate-500">
+                     <span>Uploading logo…</span>
+                     <span>{logoProgress}%</span>
+                   </div>
+                   <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+                     <div
+                       className="h-full rounded-full bg-brand-600 transition-[width]"
+                       style={{ width: `${logoProgress}%` }}
+                     />
+                   </div>
+                 </div>
+               ) : null}
+             </div>
+           </div>
 
           <div className="mt-7 border-t border-slate-200 pt-6">
             <h3 className="text-sm font-semibold text-slate-900">Published contact information</h3>
@@ -439,6 +538,43 @@ export default function StoreManagementPage() {
                 Your store is deactivated. Customers cannot open it until you activate it again.
               </Alert>
             ) : null}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">Media storage</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              usage across product photos and your store logo.
+            </p>
+            {usage ? (
+              <div className="mt-4 space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Ready files</span>
+                  <span className="font-medium text-slate-900">{usage.readyFiles}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Images</span>
+                  <span className="font-medium text-slate-900">{usage.imageFiles}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Storage used</span>
+                  <span className="font-medium text-slate-900">{formatMediaBytes(usage.totalBytes)}</span>
+                </div>
+                {usage.maxFiles != null ? (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">File limit</span>
+                    <span className="font-medium text-slate-900">{usage.maxFiles}</span>
+                  </div>
+                ) : null}
+                {usage.maxTotalBytes != null ? (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Storage limit</span>
+                    <span className="font-medium text-slate-900">{formatMediaBytes(usage.maxTotalBytes)}</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-slate-500">Storage usage is unavailable.</p>
+            )}
           </div>
         </aside>
       </div>

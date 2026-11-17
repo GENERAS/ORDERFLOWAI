@@ -4,14 +4,15 @@ AI-powered product discovery and order automation for businesses. OrderFlow AI c
 customer conversations to a business's real product catalogue, order records, inventory and
 payments through a single multi-tenant SaaS workspace.
 
-> **Current status: Day 9 — public multi-tenant storefront.**
+> **Current status: Day 10 — media storage and asset management.**
 > The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
 > a real product catalogue, live inventory with physical, reserved and available stock,
 > customer profiles with status, tags, note history, activity and duplicate overrides, orders
 > with server-authoritative prices, guest checkout, customer/business confirmation, activity history,
 > lifecycle rules and automatic stock reservations, independent payment tracking with partial
-> payments, verification, refunds, payment history and currency-aware reporting, and public
-> per-business storefronts with anonymous catalogue browsing and real order submission. AI remains a later phase.
+> payments, verification, refunds, payment history and currency-aware reporting, public
+> per-business storefronts with anonymous catalogue browsing and real order submission, and a central
+> media layer for product images and store logos. AI remains a later phase.
 
 ## What is included in this build
 
@@ -33,6 +34,8 @@ payments through a single multi-tenant SaaS workspace.
 - Product editor for details, pricing, status, reusable attributes, variants and soft archival.
 - Category, brand and attribute management with role-aware controls.
 - Private product-image uploads with 5 MB limits, signed URLs, alt text and primary-image ordering.
+- Central media asset lifecycle with provider-independent uploads, usage tracking and safe deletion.
+- Cloudinary-ready signed uploads through a Supabase Edge Function with server-side API secrets.
 - Catalogue RPCs for atomic product creation/update, attribute creation and catalogue search.
 - Live inventory balances for tracked products and variants, with generated available quantities.
 - Immutable, append-only stock movements with actor snapshots, reasons and before/after balances.
@@ -78,8 +81,8 @@ payments through a single multi-tenant SaaS workspace.
 | Language | JavaScript (ES modules) |
 | Auth | Supabase Auth (email/password) |
 | Database | Supabase PostgreSQL with Row Level Security |
-| Storage | Supabase Storage (private product images and store logos with signed URLs) |
-| Backend functions | Supabase Edge Functions (AI workflows, later phase) |
+| Storage | Supabase Storage or Cloudinary through one media adapter layer, with signed delivery URLs |
+| Backend functions | Supabase Edge Functions (Cloudinary media signing, deletion and cleanup; AI workflows later) |
 | AI | Provider selected in a later phase, called only from backend functions |
 | Deployment | Vercel-compatible static build |
 
@@ -137,6 +140,7 @@ data-backed feature will remain unavailable until credentials are added.
 | `npm run test:orders` | Run Day 7 order lifecycle, stock, numbering, snapshot and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:payments` | Run Day 8 payment, refund, reporting, numbering, idempotency and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:storefront` | Run Day 9 storefront, checkout, stock reservation, image access and RLS integration tests (requires `.env.local` and the DB password) |
+| `npm run test:media` | Run Day 10 media provider, upload lifecycle, storage, public access, RLS and cleanup integration tests (requires `.env.local` and the DB password) |
 
 ## Environment variables
 
@@ -164,6 +168,8 @@ mailer, which is rate-limited to two auth emails per hour.
   `VITE_` variables. They are bundled into the browser.
 - `.env`, `.env.local` and other local environment files are ignored by Git.
 - Server-side secrets belong in Supabase Edge Function secrets, not the frontend.
+- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` are Edge Function secrets
+  only. The browser never receives them and Cloudinary is not connected until they are deployed.
 
 Supabase credentials are available under **Project Settings → API** in the Supabase dashboard.
 
@@ -208,6 +214,8 @@ src/
     customerService.js        Customer search, profiles, tags, notes, activity, duplicates and addresses
     orderService.js           Order search, catalogue, creation, editing, status and cancellation
     paymentService.js         Payment search, summaries, recording, verification, refunds and history
+    mediaStorageManager.js    Provider-independent media upload, delete, usage and URL manager
+    media/                    Cloudinary/Supabase adapters, URL resolution and media error mapping
     baseService.js            Paginated data-access layer and retry helper
   types/
     index.js                  Domain constants and JSDoc typedefs
@@ -220,7 +228,10 @@ scripts/
   day7-order-tests.mjs        Order lifecycle, stock, numbering, snapshot and RLS integration tests
   day8-payment-tests.mjs      Payment, refund, reporting, numbering, idempotency and RLS integration tests
   day9-storefront-tests.mjs   Storefront, checkout, stock reservation, image access and RLS integration tests
+  day10-media-tests.mjs       Media provider, upload lifecycle, access, usage and RLS integration tests
 ```
+
+Edge functions live in `supabase/functions/media-manager/index.ts`.
 
 ### Architectural rules
 
@@ -254,8 +265,10 @@ scripts/
 - **Atomic storefront writes.** Store profile and product visibility changes use validated RPCs.
   Anonymous checkout uses a public order RPC that prices from the catalogue, reserves stock through
   the shared ledger, records idempotency and creates no payment records.
-- **Private image storage.** Product images and store logos use private buckets, signed URLs and
+- **Private image storage.** Legacy product images and store logos use private buckets, signed URLs and
   business-scoped storage policies.
+- **Central media lifecycle.** New product/logo uploads start, complete, fail and delete through one
+  manager and security-definer RPCs. Provider credentials stay server-side.
 - **Lazy routes.** Pages are code-split via `React.lazy` to keep the initial bundle small.
 - **Shared navigation config.** `src/config/navigation.js` drives both the sidebar and the
   header title so routes cannot drift apart.
@@ -306,7 +319,11 @@ scripts/
   and checkout. Client-supplied prices are rejected and stock is reserved with row locks.
 - Public images use anon signed URLs only while the product/store is publicly eligible. Store profile
   changes require owner/admin/manager role and product visibility changes require an active membership.
-- No fake authentication, fake sessions, fake payment gateways or fake production data is implemented.
+- Media assets are select-only for active members; provider config, limits and lifecycle changes use
+  security-definer RPCs with role/platform-admin checks.
+- Cloudinary API keys and secret live only in Edge Function secrets. The browser sends the user JWT and
+  adapter fields; it never receives service-role credentials or provider secrets.
+- No fake authentication, fake sessions, fake payment gateways, fake uploads or fake production data is implemented.
 
 ## Database (Day 2)
 
@@ -642,6 +659,38 @@ public catalogue filtering, signed private image access, checkout validation, se
 reservation, event logging, idempotency, customer matching, inactive-store blocking and cleanup. It
 runs 110 checks and cleans up its test users, businesses and storage objects.
 
+## Media storage and asset management (Day 10)
+
+Day 10 adds a single media lifecycle for product images and store logos while preserving all Day 4
+and Day 9 private storage paths and signed URLs. Full implementation notes, RPCs, Cloudinary secret
+setup and the test matrix are in [`docs/day10-media-storage.md`](docs/day10-media-storage.md).
+
+The schema is in `supabase/migrations/20261122010000_day10_media_storage.sql`, the URL resolver is in
+`supabase/migrations/20261122020000_day10_media_url_resolver.sql`, and the filename-check fix is in
+`supabase/migrations/20261122030000_day10_media_filename_check_fix.sql`. The Edge Function is in
+`supabase/functions/media-manager/index.ts`.
+
+**Media model**
+
+- The active provider is stored server-side in `public.media_provider_config`; the current project uses `supabase`.
+- Every upload is tracked in `media_assets` with idempotent client request IDs, size/type/dimensions and status.
+- Supabase uploads use signed upload URLs; Cloudinary uploads use short-lived signed fields from the Edge Function.
+- `cloudinary:<public_id>` references are accepted only when linked to a ready media asset for the same business.
+- Product images and store logos record `media_asset_id`; legacy paths and public eligibility rules remain unchanged.
+- Upload progress, replacement, removal and business usage totals are wired into the existing product and store UI.
+- Cloudinary secrets are Edge Function-only; the adapter is implemented but not connected or live-tested.
+
+**Media tests**
+
+```powershell
+. .\scripts\load-supabase-db-password.ps1
+npm run test:media
+```
+
+The suite runs 89 checks covering provider config authorization, validation, RLS, idempotent upload
+start, signed storage upload, completion, product/logo attachment, public access, URL resolution,
+usage, failures, attached-asset delete protection, limits, removal and cleanup.
+
 ## Authentication and onboarding (Day 3)
 
 Day 3 adds a complete auth and workspace-entry flow. Full implementation notes and the test
@@ -901,6 +950,21 @@ The following are scheduled for later phases and deliberately excluded from Days
 - [x] Day 9 storefront/checkout/stock/RLS integration tests pass (110 checks).
 - [x] Day 2 RLS isolation through Day 8, lint and production build still pass.
 - [x] Day 9 storefront and stock-reservation-fix migrations applied to the linked Supabase project.
+
+## Day 10 acceptance checklist
+
+- [x] Central media assets track provider, status, size, type, metadata and business ownership.
+- [x] Active provider is server-side; the current project uses Supabase Storage.
+- [x] Cloudinary signed-upload, verification, delete and cleanup actions are implemented server-side.
+- [x] Cloudinary keys are Edge Function secrets and are never exposed to the browser.
+- [x] Product images and store logos can use tracked assets while legacy paths remain valid.
+- [x] Upload validation, idempotency, limits, RLS and role checks are enforced by RPCs.
+- [x] Upload progress, replacement, removal and storage usage are available in the UI.
+- [x] Public storefront product/logo URLs support both legacy private paths and Cloudinary references.
+- [x] Day 10 media/storage/RLS integration tests pass (89 checks).
+- [x] Day 2 RLS isolation through Day 9, lint and production build still pass.
+- [x] Day 10 media, URL-resolver and filename-fix migrations applied to the linked Supabase project.
+- [ ] Cloudinary live upload/delete verified after real credentials and Edge Function deployment.
 
 ## License
 
