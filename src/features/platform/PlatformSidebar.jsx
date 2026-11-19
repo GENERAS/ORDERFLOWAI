@@ -67,48 +67,35 @@ export function PlatformSidebar({ open = false, onClose = () => {} }) {
             Platform
           </p>
           <ul className="space-y-1">
-            {platformNavigationItems.map(
-              ({ label, to, icon: Icon, available }) => (
-                <li key={to}>
-                  {available ? (
-                    <NavLink
-                      to={to}
-                      onClick={closeOnMobile}
-                      className={({ isActive }) =>
-                        cn(
-                          'group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                          isActive
-                            ? 'bg-slate-900 text-white'
-                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                        )
-                      }
-                    >
-                      {({ isActive }) => (
-                        <>
-                          <Icon
-                            aria-hidden="true"
-                            className={cn(
-                              'h-[18px] w-[18px] shrink-0',
-                              isActive ? 'text-white' : 'text-slate-400',
-                            )}
-                          />
-                          <span className="flex-1">{label}</span>
-                        </>
-                      )}
-                    </NavLink>
-                  ) : (
-                    <div
-                      className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400"
-                      aria-disabled="true"
-                    >
-                      <Icon aria-hidden="true" className="h-[18px] w-[18px] shrink-0" />
+            {platformNavigationItems.map(({ label, to, icon: Icon }) => (
+              <li key={to}>
+                <NavLink
+                  to={to}
+                  onClick={closeOnMobile}
+                  className={({ isActive }) =>
+                    cn(
+                      'group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <Icon
+                        aria-hidden="true"
+                        className={cn(
+                          'h-[18px] w-[18px] shrink-0',
+                          isActive ? 'text-white' : 'text-slate-400',
+                        )}
+                      />
                       <span className="flex-1">{label}</span>
-                      <span className="text-[10px] uppercase tracking-wide">Soon</span>
-                    </div>
+                    </>
                   )}
-                </li>
-              ),
-            )}
+                </NavLink>
+              </li>
+            ))}
           </ul>
         </nav>
 

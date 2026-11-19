@@ -8,7 +8,7 @@ import {
   Send,
   UserRound,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Alert } from '../../components/ui/Alert';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -112,7 +112,10 @@ export default function InboxPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [downloadError, setDownloadError] = useState('');
+  const location = useLocation();
+  const conversationParam = new URLSearchParams(location.search).get('conversation');
   const detailRequestRef = useRef(0);
+  const handledConversationLocationRef = useRef(null);
 
   const whatsappChannel = channels.find((channel) => channel.channel === 'whatsapp');
   const hasConnectedWhatsapp = Boolean(
@@ -233,36 +236,51 @@ export default function InboxPage() {
     [businessId],
   );
 
-  const handleSelectConversation = async (conversationId) => {
-    if (conversationId === selectedId) return;
+  const openConversation = useCallback(
+    async (conversationId) => {
+      if (!conversationId || conversationId === selectedId) return;
 
-    setSelectedId(conversationId);
-    setConversation(null);
-    setMessages([]);
-    setOldestCursor(null);
-    setSendContext(null);
-    setDownloadError('');
-    setSuccess('');
-    setComposer({
-      text: '',
-      mediaAssetId: '',
-      templateName: '',
-      templateLanguage: 'en',
-    });
+      setSelectedId(conversationId);
+      setConversation(null);
+      setMessages([]);
+      setOldestCursor(null);
+      setSendContext(null);
+      setDownloadError('');
+      setSuccess('');
+      setComposer({
+        text: '',
+        mediaAssetId: '',
+        templateName: '',
+        templateLanguage: 'en',
+      });
 
-    try {
-      await markConversationRead(conversationId);
-      setConversations((current) =>
-        current.map((item) =>
-          item.id === conversationId ? { ...item, unreadCount: 0 } : item,
-        ),
-      );
-    } catch (readError) {
-      setError(toCommunicationServiceError(readError).message);
-    }
+      try {
+        await markConversationRead(conversationId);
+        setConversations((current) =>
+          current.map((item) =>
+            item.id === conversationId ? { ...item, unreadCount: 0 } : item,
+          ),
+        );
+      } catch (readError) {
+        setError(toCommunicationServiceError(readError).message);
+      }
 
-    loadConversation(conversationId);
+      await loadConversation(conversationId);
+    },
+    [loadConversation, selectedId],
+  );
+
+  const handleSelectConversation = (conversationId) => {
+    void openConversation(conversationId);
   };
+
+  useEffect(() => {
+    if (!conversationParam || !hasConnectedWhatsapp) return;
+    if (handledConversationLocationRef.current === location.key) return;
+
+    handledConversationLocationRef.current = location.key;
+    void openConversation(conversationParam);
+  }, [conversationParam, hasConnectedWhatsapp, location.key, openConversation]);
 
   const loadOlderMessages = async () => {
     if (!selectedId || !oldestCursor || olderLoading) return;

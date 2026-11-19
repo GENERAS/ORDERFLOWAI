@@ -31,6 +31,29 @@ const PlatformOverviewPage = lazy(
 const PlatformBusinessesPage = lazy(
   () => import('./features/platform/PlatformBusinessesPage'),
 );
+const PlatformUsersPage = lazy(() => import('./features/platform/PlatformUsersPage'));
+const PlatformStorefrontsPage = lazy(
+  () => import('./features/platform/PlatformStorefrontsPage'),
+);
+const PlatformOrdersPaymentsPage = lazy(
+  () => import('./features/platform/PlatformOrdersPaymentsPage'),
+);
+const PlatformAiPage = lazy(() => import('./features/platform/PlatformAiPage'));
+const PlatformCommunicationsPage = lazy(
+  () => import('./features/platform/PlatformCommunicationsPage'),
+);
+const PlatformSubscriptionsPage = lazy(
+  () => import('./features/platform/PlatformSubscriptionsPage'),
+);
+const PlatformIntegrationsPage = lazy(
+  () => import('./features/platform/PlatformIntegrationsPage'),
+);
+const PlatformStoragePage = lazy(() => import('./features/platform/PlatformStoragePage'));
+const PlatformHealthPage = lazy(() => import('./features/platform/PlatformHealthPage'));
+const PlatformAuditPage = lazy(() => import('./features/platform/PlatformAuditPage'));
+const PlatformSettingsPage = lazy(
+  () => import('./features/platform/PlatformSettingsPage'),
+);
 
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
 const AssistantPage = lazy(() => import('./features/ai/AssistantPage'));
@@ -73,6 +96,7 @@ const PaymentDetailPage = lazy(
 );
 const ReportsPage = lazy(() => import('./features/reports/ReportsPage'));
 const TeamPage = lazy(() => import('./features/team/TeamPage'));
+const InvitationPage = lazy(() => import('./features/team/InvitationPage'));
 const SettingsPage = lazy(() => import('./features/settings/SettingsPage'));
 const StoreManagementPage = lazy(
   () => import('./features/storefront/StoreManagementPage'),
@@ -119,18 +143,20 @@ export default function App() {
             <Route element={<RequireAuth />}>
               <Route path="onboarding" element={<OnboardingPage />} />
               <Route path="workspaces" element={<WorkspacesPage />} />
+              <Route path="invite/:token" element={<InvitationPage />} />
 
-              <Route
-                element={
-                  <RequirePlatformPermission permission="platform.overview.read" />
-                }
-              >
-                <Route path="platform" element={<PlatformLayout />}>
-                  <Route
-                    index
-                    element={<Navigate to="/platform/overview" replace />}
-                  />
+              <Route path="platform" element={<PlatformLayout />}>
+                <Route
+                  index
+                  element={<Navigate to="/platform/overview" replace />}
+                />
+                <Route
+                  element={
+                    <RequirePlatformPermission permission="platform.overview.read" />
+                  }
+                >
                   <Route path="overview" element={<PlatformOverviewPage />} />
+                </Route>
                   <Route
                     element={
                       <RequirePlatformPermission permission="platform.businesses.read" />
@@ -138,8 +164,78 @@ export default function App() {
                   >
                     <Route path="businesses" element={<PlatformBusinessesPage />} />
                   </Route>
+                  <Route
+                    element={
+                      <RequirePlatformPermission permission="platform.users.read" />
+                    }
+                  >
+                    <Route path="users" element={<PlatformUsersPage />} />
+                  </Route>
+                  <Route
+                    element={
+                      <RequirePlatformPermission permission="platform.storefronts.read" />
+                    }
+                  >
+                    <Route path="storefronts" element={<PlatformStorefrontsPage />} />
+                  </Route>
+                  <Route
+                    element={
+                      <RequirePlatformPermission permission="platform.orders.read" />
+                    }
+                  >
+                    <Route path="orders-payments" element={<PlatformOrdersPaymentsPage />} />
+                  </Route>
+                  <Route
+                    element={<RequirePlatformPermission permission="platform.ai.read" />}
+                  >
+                    <Route path="ai" element={<PlatformAiPage />} />
+                  </Route>
+                  <Route
+                    element={
+                      <RequirePlatformPermission permission="platform.communications.read" />
+                    }
+                  >
+                    <Route path="communications" element={<PlatformCommunicationsPage />} />
+                  </Route>
+                  <Route
+                    element={
+                      <RequirePlatformPermission permission="platform.subscriptions.read" />
+                    }
+                  >
+                    <Route path="subscriptions" element={<PlatformSubscriptionsPage />} />
+                  </Route>
+                  <Route
+                    element={
+                      <RequirePlatformPermission permission="platform.integrations.read" />
+                    }
+                  >
+                    <Route path="integrations" element={<PlatformIntegrationsPage />} />
+                  </Route>
+                  <Route
+                    element={
+                      <RequirePlatformPermission permission="platform.storage.read" />
+                    }
+                  >
+                    <Route path="storage" element={<PlatformStoragePage />} />
+                  </Route>
+                  <Route
+                    element={<RequirePlatformPermission permission="platform.system.read" />}
+                  >
+                    <Route path="health" element={<PlatformHealthPage />} />
+                  </Route>
+                  <Route
+                    element={<RequirePlatformPermission permission="platform.audit.read" />}
+                  >
+                    <Route path="audit" element={<PlatformAuditPage />} />
+                  </Route>
+                  <Route
+                    element={
+                      <RequirePlatformPermission permission="platform.permissions.manage" />
+                    }
+                  >
+                    <Route path="settings" element={<PlatformSettingsPage />} />
+                  </Route>
                 </Route>
-              </Route>
 
               <Route element={<RequireWorkspace />}>
                 <Route element={<AppLayout />}>

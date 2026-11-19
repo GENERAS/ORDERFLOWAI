@@ -12,9 +12,11 @@ import { Sidebar } from './Sidebar';
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
-  const { platform, activeBusinessId } = useAuth();
+  const { platform, activeBusinessId, activeMembership } = useAuth();
   const supportAccessActive = Boolean(
-    activeBusinessId && platform?.supportBusinessIds?.includes(activeBusinessId),
+    activeBusinessId &&
+      (activeMembership?.isSupportSession ||
+        platform?.supportBusinessIds?.includes(activeBusinessId)),
   );
 
   useLockBodyScroll(sidebarOpen && !isDesktop);
@@ -42,7 +44,14 @@ export function AppLayout() {
               className="mb-4"
             >
               This workspace is being viewed through an audited, time-limited
-              platform support session.
+              platform support session
+              {activeMembership?.supportExpiresAt
+                ? ` ending ${new Intl.DateTimeFormat(undefined, {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  }).format(new Date(activeMembership.supportExpiresAt))}`
+                : ''}
+              .
             </Alert>
           ) : null}
           <Suspense fallback={<PageLoader />}>

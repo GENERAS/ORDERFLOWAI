@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { LogIn, Search, ShieldAlert } from 'lucide-react';
 import { Alert } from '../../components/ui/Alert';
 import { Badge } from '../../components/ui/Badge';
@@ -58,7 +58,8 @@ function StatusBadge({ status }) {
 }
 
 export default function PlatformBusinessesPage() {
-  const { platform, refreshPlatformAccess } = useAuth();
+  const navigate = useNavigate();
+  const { platform, refreshPlatformAccess, activateSupportSession } = useAuth();
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [state, setState] = useState({ status: 'loading', rows: [], error: null });
@@ -128,12 +129,13 @@ export default function PlatformBusinessesPage() {
     setBusy(true);
     setActionError(null);
     try {
-      await startPlatformSupportSession({
+      const session = await startPlatformSupportSession({
         businessId: supportTarget.id,
         purpose: form.purpose,
         durationMinutes: form.durationMinutes,
         businessRoles: canElevate && form.role ? [form.role] : [],
       });
+      activateSupportSession(session);
       await refreshPlatformAccess({ activateBusinessId: supportTarget.id });
       await refreshData();
       setSupportTarget(null);
@@ -143,6 +145,11 @@ export default function PlatformBusinessesPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function openWorkspace(session) {
+    activateSupportSession(session);
+    navigate(`/overview?support=${encodeURIComponent(session.id)}`);
   }
 
   async function handleEndSupport(session) {
@@ -203,13 +210,14 @@ export default function PlatformBusinessesPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Link
-                    to="/overview"
+                  <button
+                    type="button"
+                    onClick={() => openWorkspace(session)}
                     className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-50"
                   >
                     <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
                     Open workspace
-                  </Link>
+                  </button>
                   <Button
                     size="sm"
                     variant="secondary"

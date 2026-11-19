@@ -52,7 +52,29 @@ function storeActiveBusinessId(businessId) {
   }
 }
 
+function readSupportActivationParam() {
+  try {
+    const value = new URLSearchParams(window.location.search).get('support');
+    return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function resolveActiveBusinessId(memberships) {
+  const supportParam = readSupportActivationParam();
+  if (supportParam) {
+    const supportMembership = memberships.find(
+      (membership) =>
+        membership.isSupportSession &&
+        (membership.supportSessionId === supportParam ||
+          membership.business.id === supportParam),
+    );
+    if (supportMembership) return supportMembership.business.id;
+  }
+
   if (memberships.length === 1) {
     return memberships[0].business.id;
   }
@@ -85,6 +107,9 @@ function mapSupportSessionMembership(session) {
     role: session.business_roles?.[0] ?? 'platform_support',
     status: 'active',
     createdAt: session.started_at,
+    isSupportSession: true,
+    supportSessionId: session.id,
+    supportExpiresAt: session.expires_at,
     business,
   };
 }
@@ -101,9 +126,10 @@ function mergeSupportSessionMemberships(memberships, supportSessions) {
       supportMembership.business.id,
       existing
         ? {
-            ...supportMembership,
-            role: existing.role,
-            createdAt: existing.createdAt,
+            ...existing,
+            isSupportSession: true,
+            supportSessionId: session.id,
+            supportExpiresAt: session.expires_at,
             business: { ...supportMembership.business, ...existing.business },
           }
         : supportMembership,
@@ -116,7 +142,7 @@ function mergeSupportSessionMemberships(memberships, supportSessions) {
 async function loadMemberships(userId) {
   const [memberships, supportSessions] = await Promise.all([
     fetchMemberships(userId),
-    fetchPlatformSupportSessions(),
+    fetchPlatformSupportSessions().catch(() => []),
   ]);
   return mergeSupportSessionMemberships(memberships, supportSessions);
 }
@@ -362,14 +388,21 @@ export function AuthProvider({ children }) {
         setAuthState((previous) => {
           if (previous.user?.id !== user.id) return previous;
 
+          const supportBusinessIds = platform?.supportBusinessIds ?? [];
           let activeBusinessId;
           if (
             activateBusinessId &&
-            memberships.some(
+            (memberships.some(
               (membership) => membership.business.id === activateBusinessId,
-            )
+            ) ||
+              supportBusinessIds.includes(activateBusinessId))
           ) {
             activeBusinessId = activateBusinessId;
+          } else if (
+            previous.activeBusinessId &&
+            supportBusinessIds.includes(previous.activeBusinessId)
+          ) {
+            activeBusinessId = previous.activeBusinessId;
           } else if (
             previous.activeBusinessId &&
             memberships.some(
@@ -401,6 +434,38 @@ export function AuthProvider({ children }) {
     },
     [authState.user],
   );
+
+  const activateSupportSession = useCallback((session) => {
+    if (!session?.id || !session?.business_id) return null;
+
+    setAuthState((previous) => {
+      if (!previous.user || session.actor_user_id !== previous.user.id) {
+        return previous;
+      }
+
+      const memberships = mergeSupportSessionMemberships(previous.memberships, [
+        session,
+      ]);
+      const supportBusinessIds = [
+        ...new Set([
+          ...(previous.platform?.supportBusinessIds ?? []),
+          session.business_id,
+        ]),
+      ];
+
+      storeActiveBusinessId(session.business_id);
+      return {
+        ...previous,
+        status: 'authenticated',
+        memberships,
+        activeBusinessId: session.business_id,
+        platform: { ...EMPTY_PLATFORM, ...previous.platform, supportBusinessIds },
+        error: null,
+      };
+    });
+
+    return session.business_id;
+  }, []);
 
   const selectBusiness = useCallback((businessId) => {
     setAuthState((previous) => {
@@ -507,6 +572,7 @@ export function AuthProvider({ children }) {
       isConfigured: env.isSupabaseConfigured,
       refreshMemberships,
       refreshPlatformAccess,
+      activateSupportSession,
       selectBusiness,
       signOut,
       retry,
@@ -516,6 +582,7 @@ export function AuthProvider({ children }) {
       activeMembership,
       refreshMemberships,
       refreshPlatformAccess,
+      activateSupportSession,
       selectBusiness,
       signOut,
       retry,
