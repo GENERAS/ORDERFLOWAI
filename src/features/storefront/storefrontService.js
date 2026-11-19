@@ -270,6 +270,59 @@ export async function getStorefrontCheckoutReference({ storeSlug, reference }) {
   };
 }
 
+export function isStorefrontOrderNotFoundError(error) {
+  const message = String(error?.message ?? '');
+  return /no order has been placed|order link is not valid|order could not be found/i.test(
+    message,
+  );
+}
+
+export async function getStorefrontOrderStatus({ storeSlug, reference }) {
+  const supabase = getClient();
+  const { data, error } = await supabase.rpc('get_storefront_order_status', {
+    p_store_slug: storeSlug,
+    p_reference: reference,
+  });
+  if (error) throw toStorefrontServiceError(error);
+
+  const row = unwrapRpc(data);
+  if (!row) throw new StorefrontServiceError('This order link is no longer valid.');
+
+  const latest = row.latest_notification ?? null;
+  const timeline = Array.isArray(row.timeline) ? row.timeline : [];
+
+  return {
+    orderNumber: row.order_number,
+    status: row.status,
+    statusTitle: row.status_title,
+    statusMessage: row.status_message,
+    total: Number(row.total ?? 0),
+    currency: row.currency,
+    createdAt: row.created_at,
+    confirmedAt: row.confirmed_at ?? null,
+    completedAt: row.completed_at ?? null,
+    channel: row.channel,
+    whatsappConnected: Boolean(row.whatsapp_connected),
+    notificationChannel: row.notification_channel,
+    latestNotification: latest
+      ? {
+          title: latest.title ?? '',
+          message: latest.message ?? '',
+          createdAt: latest.createdAt ?? null,
+          deliveryChannel: latest.deliveryChannel ?? 'storefront',
+          whatsappConnected: Boolean(latest.whatsappConnected),
+        }
+      : null,
+    timeline: timeline.map((step) => ({
+      key: step.key,
+      label: step.label,
+      complete: Boolean(step.complete),
+      current: Boolean(step.current),
+      at: step.at ?? null,
+    })),
+  };
+}
+
 export async function submitStorefrontOrder({
   storeSlug,
   customerName,

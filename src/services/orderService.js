@@ -285,6 +285,47 @@ export async function searchOrders({
   };
 }
 
+export function mapStorefrontOrderQueueItem(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    orderNumber: row.order_number,
+    customerName: row.customer_name,
+    customerPhone: row.customer_phone ?? null,
+    status: row.status,
+    stockState: row.stock_state,
+    source: row.source,
+    channel: row.channel ?? null,
+    currency: row.currency,
+    total: Number(row.total ?? 0),
+    itemCount: Number(row.item_count ?? 0),
+    deliveryMethod: row.delivery_method ?? null,
+    customerConfirmedAt: row.customer_confirmed_at ?? null,
+    createdAt: row.created_at,
+    whatsappConnected: Boolean(row.whatsapp_connected),
+    latestNotificationTitle: row.latest_notification_title ?? null,
+    latestNotificationMessage: row.latest_notification_message ?? null,
+  };
+}
+
+export async function listStorefrontOrderQueue({
+  businessId,
+  status = null,
+  limit = 20,
+} = {}) {
+  if (!businessId) throw new OrderServiceError('Select a workspace first.');
+
+  const supabase = getClient();
+  const { data, error } = await supabase.rpc('list_storefront_order_queue', {
+    p_business_id: businessId,
+    p_status: toNullableText(status),
+    p_limit: Math.min(Math.max(Math.floor(Number(limit) || 20), 1), 100),
+  });
+  if (error) throw toOrderServiceError(error);
+
+  return (data ?? []).map(mapStorefrontOrderQueueItem);
+}
+
 async function loadOrderItems(supabase, { businessId, orderId }) {
   const { data, error } = await supabase
     .from('order_items')

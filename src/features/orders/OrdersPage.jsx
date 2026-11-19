@@ -8,6 +8,7 @@ import {
   MessageCircleQuestion,
   PackageCheck,
   Plus,
+  RefreshCw,
   Search,
   ShoppingCart,
   Timer,
@@ -37,6 +38,7 @@ import {
 } from '../../services/aiAssistantService';
 import {
   getOrderOverview,
+  listStorefrontOrderQueue,
   searchOrders,
   toOrderServiceError,
 } from '../../services/orderService';
@@ -95,6 +97,10 @@ export default function OrdersPage() {
   const [preparationError, setPreparationError] = useState('');
   const [busyPreparation, setBusyPreparation] = useState(null);
   const [preparationRefresh, setPreparationRefresh] = useState(0);
+  const [storefrontOrders, setStorefrontOrders] = useState([]);
+  const [storefrontQueueLoading, setStorefrontQueueLoading] = useState(true);
+  const [storefrontQueueError, setStorefrontQueueError] = useState('');
+  const [storefrontQueueRefresh, setStorefrontQueueRefresh] = useState(0);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -148,6 +154,33 @@ export default function OrdersPage() {
       active = false;
     };
   }, [businessId, preparationRefresh]);
+
+  useEffect(() => {
+    let active = true;
+    if (!businessId) return undefined;
+
+    Promise.resolve().then(() => {
+      if (active) setStorefrontQueueLoading(true);
+    });
+
+    listStorefrontOrderQueue({ businessId, limit: 20 })
+      .then((items) => {
+        if (!active) return;
+        setStorefrontOrders(Array.isArray(items) ? items : []);
+        setStorefrontQueueError('');
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        setStorefrontQueueError(toOrderServiceError(loadError).message);
+      })
+      .finally(() => {
+        if (active) setStorefrontQueueLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [businessId, storefrontQueueRefresh]);
 
   useEffect(() => {
     let active = true;
@@ -277,6 +310,34 @@ export default function OrdersPage() {
     filters.direction !== 'desc';
   const totalPages = Math.max(1, Math.ceil(total / ORDER_PAGE_SIZE));
 
+  const storefrontGroups = [
+    {
+      key: 'needs-approval',
+      label: 'Needs approval',
+      description: 'Review and approve these first.',
+      orders: storefrontOrders.filter((item) =>
+        ['draft', 'awaiting_confirmation', 'awaiting_business_approval'].includes(item.status),
+      ),
+    },
+    {
+      key: 'proceeding',
+      label: 'Proceeding',
+      description: 'Approved orders moving through fulfilment.',
+      orders: storefrontOrders.filter((item) =>
+        ['confirmed', 'processing', 'ready'].includes(item.status),
+      ),
+    },
+    {
+      key: 'closed',
+      label: 'Completed and cancelled',
+      description: 'Recently closed storefront orders.',
+      orders: storefrontOrders.filter((item) =>
+        ['completed', 'cancelled'].includes(item.status),
+      ),
+    },
+  ];
+  const needsApprovalCount = storefrontGroups[0].orders.length;
+
   return (
     <section className="space-y-6" aria-labelledby="orders-title">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -370,6 +431,127 @@ export default function OrdersPage() {
           </div>
         </Alert>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle as="h2">Storefront order inbox</CardTitle>
+            <CardDescription>
+              Online store and WhatsApp checkout orders are grouped by the next action so new
+              orders do not get mixed into every other order.
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={needsApprovalCount > 0 ? 'warning' : 'neutral'}>
+              {needsApprovalCount} needs approval
+            </Badge>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setStorefrontQueueRefresh((value) => value + 1)}
+              disabled={storefrontQueueLoading}
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              Refresh
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {storefrontQueueError ? (
+            <Alert variant="error">{storefrontQueueError}</Alert>
+          ) : null}
+          {storefrontQueueLoading ? (
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Organising storefront orders...
+            </div>
+          ) : null}
+          {!storefrontQueueLoading && storefrontOrders.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No storefront orders have arrived yet.
+            </p>
+          ) : null}
+          {!storefrontQueueLoading
+            ? storefrontGroups.map((group) =>
+                group.orders.length > 0 ? (
+                  <section key={group.key} className="space-y-2">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        {group.label}
+                      </h3>
+                      <Badge variant="neutral">{group.orders.length}</Badge>
+                      <p className="text-xs text-slate-500">{group.description}</p>
+                    </div>
+                    <div className="space-y-2">
+                      {group.orders.map((item) => {
+                        const statusBadge = getOrderStatusBadge(item.status);
+                        return (
+                          <article
+                            key={item.id}
+                            className="rounded-xl border border-slate-200 bg-white p-3"
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Link
+                                    to={`/orders/${item.id}`}
+                                    className="text-sm font-semibold text-brand-700 hover:underline"
+                                  >
+                                    {item.orderNumber}
+                                  </Link>
+                                  <Badge variant={statusBadge.variant}>
+                                    {statusBadge.label}
+                                  </Badge>
+                                  <Badge variant="brand">Storefront</Badge>
+                                  {item.channel ? (
+                                    <Badge variant="neutral">{item.channel}</Badge>
+                                  ) : (
+                                    <Badge variant="neutral">online_store</Badge>
+                                  )}
+                                  {!item.whatsappConnected ? (
+                                    <Badge variant="warning">In-app updates</Badge>
+                                  ) : null}
+                                </div>
+                                <p className="mt-1 text-sm text-slate-600">
+                                  {item.customerName}
+                                  {item.customerPhone ? ` - ${item.customerPhone}` : ''}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-400">
+                                  {item.itemCount} item{item.itemCount === 1 ? '' : 's'}
+                                  {' - '}
+                                  {formatDateTime(item.createdAt)}
+                                  {item.deliveryMethod
+                                    ? ` - ${item.deliveryMethod.replace('_', ' ')}`
+                                    : ''}
+                                </p>
+                                {item.latestNotificationMessage ? (
+                                  <p className="mt-2 text-xs text-slate-500">
+                                    {item.latestNotificationMessage}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <div className="flex shrink-0 items-center justify-between gap-4 sm:flex-col sm:items-end">
+                                <p className="text-sm font-semibold text-slate-900">
+                                  {formatCurrency(item.total, { currency: item.currency })}
+                                </p>
+                                <Link
+                                  to={`/orders/${item.id}`}
+                                  className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-50"
+                                >
+                                  Review order
+                                </Link>
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null,
+              )
+            : null}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

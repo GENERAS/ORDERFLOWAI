@@ -396,7 +396,7 @@ async function storeForBusiness(businessId) {
 
 async function orderByNumber(orderNumber) {
   const { rows } = await db.query(
-    'select * from public.orders where order_number = $1',
+    'select * from public.orders where order_number = $1 order by created_at desc limit 1',
     [orderNumber],
   );
   return rows[0] ?? null;

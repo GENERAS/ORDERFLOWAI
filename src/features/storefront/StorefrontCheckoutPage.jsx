@@ -24,6 +24,8 @@ import {
 import {
   createStorefrontCheckoutReference,
   getStorefrontCheckoutReference,
+  getStorefrontOrderStatus,
+  isStorefrontOrderNotFoundError,
   submitStorefrontOrder,
   toStorefrontServiceError,
 } from './storefrontService';
@@ -52,13 +54,17 @@ export default function StorefrontCheckoutPage() {
   const [confirmation, setConfirmation] = useState(null);
   const [referenceData, setReferenceData] = useState(null);
   const [referenceError, setReferenceError] = useState('');
+  const [createdReference, setCreatedReference] = useState(null);
+  const [orderStatus, setOrderStatus] = useState(null);
+  const [orderStatusError, setOrderStatusError] = useState('');
+  const [statusLinkCopied, setStatusLinkCopied] = useState(false);
   const [whatsappBusy, setWhatsappBusy] = useState(false);
   const [whatsappError, setWhatsappError] = useState('');
   const [whatsappReference, setWhatsappReference] = useState(null);
   const [copied, setCopied] = useState(false);
-  const idempotencyKeyRef = useRef(null);
   const submittingRef = useRef(false);
   const whatsappBusyRef = useRef(false);
+  const activeReference = reference || createdReference;
 
   useEffect(() => {
     if (!reference) return undefined;
@@ -70,15 +76,51 @@ export default function StorefrontCheckoutPage() {
         setReferenceData(data);
         setReferenceError('');
       })
-      .catch((loadError) => {
+      .catch(async (loadError) => {
         if (!active) return;
-        setReferenceError(toStorefrontServiceError(loadError).message);
+        const checkoutError = toStorefrontServiceError(loadError);
+
+        try {
+          const status = await getStorefrontOrderStatus({ storeSlug, reference });
+          if (!active) return;
+          setOrderStatus(status);
+          setReferenceError('');
+        } catch (statusError) {
+          if (!active) return;
+          const normalizedStatusError = toStorefrontServiceError(statusError);
+          setReferenceError(
+            isStorefrontOrderNotFoundError(normalizedStatusError)
+              ? normalizedStatusError.message
+              : checkoutError.message,
+          );
+        }
       });
 
     return () => {
       active = false;
     };
   }, [reference, storeSlug]);
+
+  useEffect(() => {
+    if (!activeReference || !orderStatus) return undefined;
+    if (['completed', 'cancelled'].includes(orderStatus.status)) return undefined;
+
+    let active = true;
+    const timer = window.setInterval(() => {
+      getStorefrontOrderStatus({ storeSlug, reference: activeReference })
+        .then((status) => {
+          if (active) setOrderStatus(status);
+        })
+        .catch(() => {
+          if (active) setOrderStatusError('Live updates are temporarily unavailable.');
+        });
+    }, 10000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [activeReference, orderStatus, storeSlug]);
 
   const updateField = (field) => (event) => {
     setForm((current) => ({ ...current, [field]: event.target.value }));
@@ -88,7 +130,10 @@ export default function StorefrontCheckoutPage() {
   const effectiveItems = referenceData?.items ?? cart;
   const effectiveSubtotal = getCartSubtotal(effectiveItems);
   const effectiveCurrency = referenceData?.currency || store.currency || effectiveItems[0]?.currency || 'RWF';
-  const referenceLoading = Boolean(reference) && !referenceData && !referenceError;
+  const referenceLoading = Boolean(reference)
+    && !referenceData
+    && !orderStatus
+    && !referenceError;
 
   const validateCart = () => {
     if (effectiveItems.length > 0) return true;
@@ -112,18 +157,23 @@ export default function StorefrontCheckoutPage() {
     event.preventDefault();
     if (submittingRef.current || !validate()) return;
 
-    if (!idempotencyKeyRef.current) {
-      idempotencyKeyRef.current =
-        typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    }
-
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError('');
 
     try {
+      let orderReference = activeReference;
+
+      if (!orderReference) {
+        const created = await createStorefrontCheckoutReference({
+          storeSlug,
+          items: effectiveItems,
+          channel: 'online_store',
+        });
+        orderReference = created.reference;
+        setCreatedReference(created.reference);
+      }
+
       const result = await submitStorefrontOrder({
         storeSlug,
         customerName: form.customerName,
@@ -133,11 +183,25 @@ export default function StorefrontCheckoutPage() {
         city: form.city,
         instructions: form.instructions,
         items: effectiveItems,
-        idempotencyKey: reference ? null : idempotencyKeyRef.current,
-        checkoutReference: reference || null,
-        channel: reference ? referenceData?.channel || 'whatsapp' : null,
+        idempotencyKey: null,
+        checkoutReference: orderReference,
+        channel: referenceData?.channel || (orderReference === whatsappReference?.reference
+          ? 'whatsapp'
+          : 'online_store'),
       });
       setConfirmation(result);
+
+      try {
+        const status = await getStorefrontOrderStatus({
+          storeSlug,
+          reference: orderReference,
+        });
+        setOrderStatus(status);
+        setOrderStatusError('');
+      } catch {
+        setOrderStatusError('The order was received, but live status could not be loaded.');
+      }
+
       clearCart();
     } catch (error) {
       setSubmitError(toStorefrontServiceError(error).message);
@@ -162,6 +226,7 @@ export default function StorefrontCheckoutPage() {
         channel: 'whatsapp',
       });
       setWhatsappReference(created);
+      setCreatedReference(created.reference);
 
       const handoffUrl = buildWhatsAppHandoffUrl({
         phone: store.contactPhone,
@@ -191,47 +256,163 @@ export default function StorefrontCheckoutPage() {
     }
   };
 
-  if (confirmation) {
+  const handleCopyStatusLink = async () => {
+    if (!activeReference) return;
+    const statusUrl = buildCheckoutUrl(
+      `/store/${storeSlug}/checkout/${activeReference}`,
+    );
+
+    try {
+      await navigator.clipboard.writeText(statusUrl);
+      setStatusLinkCopied(true);
+    } catch {
+      setOrderStatusError(`Copy this link: ${statusUrl}`);
+    }
+  };
+
+  if (confirmation || orderStatus) {
+    const displayStatus = orderStatus;
+    const timeline = displayStatus?.timeline ?? [];
+    const latestNotification = displayStatus?.latestNotification ?? null;
+    const isTerminal = ['completed', 'cancelled'].includes(displayStatus?.status);
+    const orderNumber = displayStatus?.orderNumber ?? confirmation?.orderNumber;
+    const total = displayStatus?.total ?? confirmation?.total ?? 0;
+    const currency = displayStatus?.currency ?? confirmation?.currency;
+    const createdAt = displayStatus?.createdAt ?? confirmation?.createdAt;
+    const statusTitle = displayStatus?.statusTitle ?? 'Order received';
+    const statusMessage = displayStatus?.statusMessage ?? confirmation?.message;
+
     return (
-      <div className="mx-auto max-w-2xl px-4 py-14 sm:px-6">
-        <div className="sf-surface p-8 text-center">
-          <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-500" aria-hidden="true" />
-          <h1 className="mt-4 text-2xl font-bold text-slate-900">Order received</h1>
-          <p className="mt-2 text-sm text-slate-600">{confirmation.message}</p>
-          <dl className="mt-7 grid gap-4 rounded-xl bg-slate-50 p-5 text-left sm:grid-cols-2">
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-slate-400">Order number</dt>
-              <dd className="mt-1 text-sm font-semibold text-slate-900">{confirmation.orderNumber}</dd>
+      <div className="mx-auto max-w-3xl px-4 py-14 sm:px-6">
+        <div className="sf-surface overflow-hidden">
+          <div className="border-b border-slate-100 p-8 text-center sm:p-10">
+            <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-500" aria-hidden="true" />
+            <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+              {statusTitle}
+            </h1>
+            <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-600">
+              {statusMessage}
+            </p>
+            {!isTerminal ? (
+              <p className="mt-2 inline-flex items-center gap-2 text-xs font-medium text-slate-500">
+                <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
+                This page updates automatically as the business processes your order.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="grid gap-5 p-6 sm:grid-cols-2 sm:p-8">
+            <div className="sf-surface-soft p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Order details
+              </p>
+              <dl className="mt-4 space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Order number</dt>
+                  <dd className="font-semibold text-slate-900">{orderNumber}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Total</dt>
+                  <dd className="font-semibold text-slate-900">
+                    {formatCurrency(total, { currency })}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Received</dt>
+                  <dd className="font-semibold text-slate-900">
+                    {formatDateTime(createdAt)}
+                  </dd>
+                </div>
+              </dl>
+              <Button
+                className="mt-5 h-10 w-full rounded-xl"
+                variant="secondary"
+                onClick={handleCopyStatusLink}
+              >
+                <Copy className="h-4 w-4" aria-hidden="true" />
+                {statusLinkCopied ? 'Status link copied' : 'Copy status link'}
+              </Button>
             </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-slate-400">Status</dt>
-              <dd className="mt-1 text-sm font-semibold text-slate-900">
-                Awaiting business approval
-              </dd>
+
+            <div className="p-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Progress
+              </p>
+              <ol className="mt-4 space-y-4">
+                {timeline.map((step) => (
+                  <li key={step.key} className="flex items-start gap-3">
+                    <span
+                      className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                        step.complete
+                          ? step.current
+                            ? 'sf-accent-bg text-white'
+                            : 'bg-emerald-100 text-emerald-700'
+                          : 'bg-slate-100 text-slate-400'
+                      }`}
+                    >
+                      {step.complete ? '✓' : ''}
+                    </span>
+                    <div className="min-w-0">
+                      <p
+                        className={`text-sm font-semibold ${
+                          step.current ? 'text-slate-900' : 'text-slate-600'
+                        }`}
+                      >
+                        {step.label}
+                      </p>
+                      {step.at ? (
+                        <p className="mt-0.5 text-xs text-slate-400">
+                          {formatDateTime(step.at)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ol>
             </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-slate-400">Total</dt>
-              <dd className="mt-1 text-sm font-semibold text-slate-900">
-                {formatCurrency(confirmation.total, { currency: confirmation.currency })}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-slate-400">Received</dt>
-              <dd className="mt-1 text-sm font-semibold text-slate-900">
-                {formatDateTime(confirmation.createdAt)}
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-5 text-xs text-slate-500">
-            No payment has been recorded. The business will confirm your order and arrangements directly.
-          </p>
-          <Link
-            to={`/store/${storeSlug}`}
-            className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            Continue shopping
-          </Link>
+          </div>
+
+          <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-5 sm:px-8">
+            {latestNotification ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">
+                  {latestNotification.title}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">
+                  {latestNotification.message}
+                </p>
+              </div>
+            ) : null}
+            <Alert
+              className="mt-3"
+              variant={displayStatus?.whatsappConnected ? 'info' : 'warning'}
+              title={
+                displayStatus?.whatsappConnected
+                  ? 'WhatsApp updates are connected'
+                  : 'WhatsApp is not connected'
+              }
+            >
+              {displayStatus?.whatsappConnected
+                ? 'You will also receive WhatsApp updates. This page keeps the same live status.'
+                : 'We detected that WhatsApp is not connected, so your order status and approval updates are shown here automatically.'}
+            </Alert>
+            {orderStatusError ? (
+              <Alert className="mt-3" variant="error">
+                {orderStatusError}
+              </Alert>
+            ) : null}
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+              No payment has been recorded here. The business will confirm order details and
+              payment arrangements before fulfilment.
+            </p>
+            <Link
+              to={`/store/${storeSlug}`}
+              className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              Continue shopping
+            </Link>
+          </div>
         </div>
       </div>
     );
