@@ -15,7 +15,7 @@ const roleLabels = {
 export function Sidebar({ open = false, onClose = () => {} }) {
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   const isHidden = !isDesktop && !open;
-  const { memberships, activeBusiness, activeMembership } = useAuth();
+  const { memberships, activeBusiness, activeMembership, platform } = useAuth();
 
   const closeOnMobile = () => {
     if (!isDesktop) onClose();
@@ -133,6 +133,15 @@ export function Sidebar({ open = false, onClose = () => {} }) {
                 className="mt-2 inline-block text-xs font-semibold text-brand-700 hover:text-brand-800"
               >
                 Switch workspace
+              </Link>
+            ) : null}
+            {platform?.permissions?.includes('platform.overview.read') ? (
+              <Link
+                to="/platform/overview"
+                onClick={closeOnMobile}
+                className="mt-2 block text-xs font-semibold text-slate-700 hover:text-slate-900"
+              >
+                Platform console
               </Link>
             ) : null}
           </div>

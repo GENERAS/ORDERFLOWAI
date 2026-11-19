@@ -3,13 +3,23 @@ import { env } from '../../lib/env';
 import { getSupabaseClient } from '../../lib/supabase/client';
 import {
   fetchMemberships,
+  fetchPlatformContext,
   fetchProfile,
   signOut as signOutRequest,
   toAuthServiceError,
 } from '../../services/authService';
+import { fetchPlatformSupportSessions } from '../platform/platformService';
 import { AuthContext } from './authContext';
 
 const ACTIVE_BUSINESS_STORAGE_KEY = 'orderflow.activeBusinessId';
+
+const EMPTY_PLATFORM = Object.freeze({
+  isSuperAdmin: false,
+  isPlatformAdmin: false,
+  permissions: [],
+  roles: [],
+  supportBusinessIds: [],
+});
 
 const EMPTY_STATE = Object.freeze({
   status: 'loading',
@@ -18,6 +28,7 @@ const EMPTY_STATE = Object.freeze({
   profile: null,
   memberships: [],
   activeBusinessId: null,
+  platform: EMPTY_PLATFORM,
   error: null,
 });
 
@@ -52,6 +63,62 @@ function resolveActiveBusinessId(memberships) {
   }
 
   return null;
+}
+
+function mapSupportSessionMembership(session) {
+  const business = {
+    id: session.business_id,
+    name: session.business_name,
+    slug: session.business_slug,
+    industry: session.business_industry ?? null,
+    country: session.business_country,
+    currency: session.business_currency,
+    timezone: session.business_timezone,
+    createdAt: session.business_created_at,
+    updatedAt: session.business_updated_at,
+  };
+
+  return {
+    id: `support:${session.id}`,
+    businessId: session.business_id,
+    userId: session.actor_user_id,
+    role: session.business_roles?.[0] ?? 'platform_support',
+    status: 'active',
+    createdAt: session.started_at,
+    business,
+  };
+}
+
+function mergeSupportSessionMemberships(memberships, supportSessions) {
+  const byBusinessId = new Map(
+    memberships.map((membership) => [membership.business.id, membership]),
+  );
+
+  supportSessions.forEach((session) => {
+    const supportMembership = mapSupportSessionMembership(session);
+    const existing = byBusinessId.get(supportMembership.business.id);
+    byBusinessId.set(
+      supportMembership.business.id,
+      existing
+        ? {
+            ...supportMembership,
+            role: existing.role,
+            createdAt: existing.createdAt,
+            business: { ...supportMembership.business, ...existing.business },
+          }
+        : supportMembership,
+    );
+  });
+
+  return [...byBusinessId.values()];
+}
+
+async function loadMemberships(userId) {
+  const [memberships, supportSessions] = await Promise.all([
+    fetchMemberships(userId),
+    fetchPlatformSupportSessions(),
+  ]);
+  return mergeSupportSessionMemberships(memberships, supportSessions);
 }
 
 function signedOutState(error = null) {
@@ -115,9 +182,10 @@ export function AuthProvider({ children }) {
     );
 
     try {
-      const [profile, memberships] = await Promise.all([
+      const [profile, memberships, platform] = await Promise.all([
         fetchProfile(userId),
-        fetchMemberships(userId),
+        loadMemberships(userId),
+        fetchPlatformContext(),
       ]);
 
       if (requestId !== requestIdRef.current) return;
@@ -134,6 +202,7 @@ export function AuthProvider({ children }) {
         profile,
         memberships,
         activeBusinessId,
+        platform,
         error: null,
       });
     } catch (error) {
@@ -234,7 +303,7 @@ export function AuthProvider({ children }) {
       if (!user) return [];
 
       try {
-        const memberships = await fetchMemberships(user.id);
+        const memberships = await loadMemberships(user.id);
 
         setAuthState((previous) => {
           if (previous.user?.id !== user.id) return previous;
@@ -270,6 +339,60 @@ export function AuthProvider({ children }) {
         });
 
         return memberships;
+      } catch (error) {
+        const normalized = toAuthServiceError(error);
+        setAuthState((previous) => ({ ...previous, error: normalized.message }));
+        throw normalized;
+      }
+    },
+    [authState.user],
+  );
+
+  const refreshPlatformAccess = useCallback(
+    async ({ activateBusinessId } = {}) => {
+      const user = authState.user;
+      if (!user) return null;
+
+      try {
+        const [platform, memberships] = await Promise.all([
+          fetchPlatformContext(),
+          loadMemberships(user.id),
+        ]);
+
+        setAuthState((previous) => {
+          if (previous.user?.id !== user.id) return previous;
+
+          let activeBusinessId;
+          if (
+            activateBusinessId &&
+            memberships.some(
+              (membership) => membership.business.id === activateBusinessId,
+            )
+          ) {
+            activeBusinessId = activateBusinessId;
+          } else if (
+            previous.activeBusinessId &&
+            memberships.some(
+              (membership) => membership.business.id === previous.activeBusinessId,
+            )
+          ) {
+            activeBusinessId = previous.activeBusinessId;
+          } else {
+            activeBusinessId = resolveActiveBusinessId(memberships);
+          }
+
+          storeActiveBusinessId(activeBusinessId);
+          return {
+            ...previous,
+            status: 'authenticated',
+            platform,
+            memberships,
+            activeBusinessId,
+            error: null,
+          };
+        });
+
+        return platform;
       } catch (error) {
         const normalized = toAuthServiceError(error);
         setAuthState((previous) => ({ ...previous, error: normalized.message }));
@@ -340,11 +463,11 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      await refreshMemberships();
+      await refreshPlatformAccess();
     } catch {
       // Focus revalidation is best-effort; explicit actions surface their own errors.
     }
-  }, [authState.user, refreshMemberships]);
+  }, [authState.user, refreshPlatformAccess]);
 
   useEffect(() => {
     if (authState.status !== 'authenticated') return undefined;
@@ -383,6 +506,7 @@ export function AuthProvider({ children }) {
       activeMembership,
       isConfigured: env.isSupabaseConfigured,
       refreshMemberships,
+      refreshPlatformAccess,
       selectBusiness,
       signOut,
       retry,
@@ -391,6 +515,7 @@ export function AuthProvider({ children }) {
       authState,
       activeMembership,
       refreshMemberships,
+      refreshPlatformAccess,
       selectBusiness,
       signOut,
       retry,

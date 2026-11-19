@@ -1,10 +1,15 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
 import { PageLoader } from './components/ui/PageLoader';
 import { AuthProvider } from './features/auth/AuthProvider';
 import { AuthLayout } from './features/auth/AuthLayout';
-import { RequireAuth, RequireWorkspace, RootRedirect } from './features/auth/guards';
+import {
+  RequireAuth,
+  RequirePlatformPermission,
+  RequireWorkspace,
+  RootRedirect,
+} from './features/auth/guards';
 
 const LoginPage = lazy(() => import('./features/auth/LoginPage'));
 const RegisterPage = lazy(() => import('./features/auth/RegisterPage'));
@@ -14,6 +19,18 @@ const ResetPasswordPage = lazy(() => import('./features/auth/ResetPasswordPage')
 const AuthCallbackPage = lazy(() => import('./features/auth/AuthCallbackPage'));
 const OnboardingPage = lazy(() => import('./features/onboarding/OnboardingPage'));
 const WorkspacesPage = lazy(() => import('./features/workspaces/WorkspacesPage'));
+
+const PlatformLayout = lazy(() =>
+  import('./features/platform/PlatformLayout').then((module) => ({
+    default: module.PlatformLayout,
+  })),
+);
+const PlatformOverviewPage = lazy(
+  () => import('./features/platform/PlatformOverviewPage'),
+);
+const PlatformBusinessesPage = lazy(
+  () => import('./features/platform/PlatformBusinessesPage'),
+);
 
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
 const AssistantPage = lazy(() => import('./features/ai/AssistantPage'));
@@ -98,6 +115,27 @@ export default function App() {
             <Route element={<RequireAuth />}>
               <Route path="onboarding" element={<OnboardingPage />} />
               <Route path="workspaces" element={<WorkspacesPage />} />
+
+              <Route
+                element={
+                  <RequirePlatformPermission permission="platform.overview.read" />
+                }
+              >
+                <Route path="platform" element={<PlatformLayout />}>
+                  <Route
+                    index
+                    element={<Navigate to="/platform/overview" replace />}
+                  />
+                  <Route path="overview" element={<PlatformOverviewPage />} />
+                  <Route
+                    element={
+                      <RequirePlatformPermission permission="platform.businesses.read" />
+                    }
+                  >
+                    <Route path="businesses" element={<PlatformBusinessesPage />} />
+                  </Route>
+                </Route>
+              </Route>
 
               <Route element={<RequireWorkspace />}>
                 <Route element={<AppLayout />}>

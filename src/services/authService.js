@@ -205,38 +205,40 @@ export async function fetchProfile(userId) {
   return mapProfile(data);
 }
 
-function mapSuperAdminMembership(row) {
-  return mapMembership(
-    {
-      id: `super-admin-${row.id}`,
-      business_id: row.id,
-      user_id: row.user_id,
-      role: row.role,
-      status: row.status,
-      created_at: row.created_at,
-    },
-    mapBusiness(row),
-  );
+const EMPTY_PLATFORM_CONTEXT = Object.freeze({
+  isSuperAdmin: false,
+  isPlatformAdmin: false,
+  permissions: [],
+  roles: [],
+  supportBusinessIds: [],
+});
+
+function mapPlatformContext(row) {
+  return {
+    isSuperAdmin: Boolean(row?.is_super_admin),
+    isPlatformAdmin: Boolean(row?.is_platform_admin),
+    permissions: Array.isArray(row?.permissions) ? row.permissions : [],
+    roles: Array.isArray(row?.roles) ? row.roles : [],
+    supportBusinessIds: Array.isArray(row?.support_business_ids)
+      ? row.support_business_ids
+      : [],
+  };
 }
 
-export async function fetchSuperAdminBusinesses() {
+export async function fetchPlatformContext() {
   const supabase = getClient();
-  const { data, error } = await supabase.rpc('super_admin_list_businesses');
+  const { data, error } = await supabase.rpc('platform_get_context');
 
   if (error) {
-    if (error.code === '42501' || /super administrator/i.test(error.message ?? '')) {
-      return [];
-    }
+    if (error.code === '42501') return EMPTY_PLATFORM_CONTEXT;
     throw toAuthServiceError(error);
   }
 
-  return (data ?? []).map(mapSuperAdminMembership);
+  const row = Array.isArray(data) ? data[0] : data;
+  return mapPlatformContext(row);
 }
 
 export async function fetchMemberships(userId) {
-  const superAdminMemberships = await fetchSuperAdminBusinesses();
-  if (superAdminMemberships.length) return superAdminMemberships;
-
   const supabase = getClient();
   const { data: memberRows, error: memberError } = await supabase
     .from('business_members')

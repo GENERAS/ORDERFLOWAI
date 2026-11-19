@@ -2,7 +2,9 @@ import { Suspense, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useLockBodyScroll } from '../../hooks/useLockBodyScroll';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { Alert } from '../ui/Alert';
 import { PageLoader } from '../ui/PageLoader';
+import { useAuth } from '../../features/auth/authContext';
 import { ConfigNotice } from './ConfigNotice';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
@@ -10,6 +12,10 @@ import { Sidebar } from './Sidebar';
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
+  const { platform, activeBusinessId } = useAuth();
+  const supportAccessActive = Boolean(
+    activeBusinessId && platform?.supportBusinessIds?.includes(activeBusinessId),
+  );
 
   useLockBodyScroll(sidebarOpen && !isDesktop);
 
@@ -29,6 +35,16 @@ export function AppLayout() {
 
         <main id="main-content" className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <ConfigNotice />
+          {supportAccessActive ? (
+            <Alert
+              variant="warning"
+              title="Platform support access is active"
+              className="mb-4"
+            >
+              This workspace is being viewed through an audited, time-limited
+              platform support session.
+            </Alert>
+          ) : null}
           <Suspense fallback={<PageLoader />}>
             <Outlet />
           </Suspense>
