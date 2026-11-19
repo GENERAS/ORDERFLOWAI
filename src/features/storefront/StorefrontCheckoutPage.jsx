@@ -194,7 +194,7 @@ export default function StorefrontCheckoutPage() {
   if (confirmation) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-14 sm:px-6">
-        <div className="rounded-2xl border border-emerald-200 bg-white p-7 text-center shadow-sm">
+        <div className="sf-surface p-8 text-center">
           <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-500" aria-hidden="true" />
           <h1 className="mt-4 text-2xl font-bold text-slate-900">Order received</h1>
           <p className="mt-2 text-sm text-slate-600">{confirmation.message}</p>
@@ -264,7 +264,7 @@ export default function StorefrontCheckoutPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
       <Link
         to={`/store/${storeSlug}`}
         className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900"
@@ -273,7 +273,7 @@ export default function StorefrontCheckoutPage() {
         Continue shopping
       </Link>
 
-      <h1 className="mt-6 text-3xl font-bold tracking-tight text-slate-900">
+      <h1 className="mt-6 text-3xl font-extrabold tracking-[-0.035em] text-slate-900 sm:text-4xl">
         {referenceData ? 'Confirm your order' : 'Checkout'}
       </h1>
       <p className="mt-2 text-sm text-slate-600">
@@ -281,6 +281,14 @@ export default function StorefrontCheckoutPage() {
           ? `Review the items saved from your chat with ${store.name}, then confirm your details.`
           : `Choose how you want to order from ${store.name}.`}
       </p>
+
+      <div className="mt-6 flex items-center gap-2 text-xs font-semibold text-slate-500">
+        <span className="sf-accent-bg flex h-6 w-6 items-center justify-center rounded-full text-white">1</span>
+        <span>Review items</span>
+        <span className="sf-hairline w-8" />
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-white">2</span>
+        <span>Confirm details</span>
+      </div>
 
       {referenceData ? (
         <Alert className="mt-6" variant="info" title="Secure WhatsApp checkout">
@@ -313,10 +321,10 @@ export default function StorefrontCheckoutPage() {
         <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_380px]">
           <form
             onSubmit={handleSubmit}
-            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+            className="sf-surface p-5 sm:p-7"
           >
             {!referenceData ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="sf-surface-soft p-5">
                 <div className="flex items-start gap-3">
                   <MessageCircle className="mt-0.5 h-5 w-5 shrink-0 text-slate-700" aria-hidden="true" />
                   <div className="min-w-0">
@@ -326,7 +334,7 @@ export default function StorefrontCheckoutPage() {
                       details with you, then the business approves the order.
                     </p>
                     <Button
-                      className="mt-3 w-full"
+                      className="mt-3 h-11 w-full rounded-xl"
                       variant="secondary"
                       onClick={handleWhatsApp}
                       disabled={whatsappBusy}
@@ -444,7 +452,7 @@ export default function StorefrontCheckoutPage() {
               </Alert>
             ) : null}
 
-            <Button className="mt-6 w-full" type="submit" disabled={submitting}>
+            <Button className="mt-6 h-11 w-full rounded-xl" type="submit" disabled={submitting}>
               {submitting ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               ) : null}

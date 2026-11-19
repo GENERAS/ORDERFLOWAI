@@ -131,10 +131,13 @@ export default function StorefrontLayout() {
 
   return (
     <StorefrontContext.Provider value={contextValue}>
-      <div className="min-h-screen bg-slate-50 text-slate-900">
+      <div
+        className="sf-root min-h-screen bg-slate-50 text-slate-900"
+        style={{ '--sf-accent': accent }}
+      >
         <header
-          className="border-b border-slate-200 bg-white/95 backdrop-blur"
-          style={{ borderTopColor: accent, borderTopWidth: 3 }}
+          className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur"
+          style={{ borderTopColor: accent, borderTopWidth: 2 }}
         >
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
             <Link
@@ -145,18 +148,18 @@ export default function StorefrontLayout() {
                 <img
                   src={store.logoUrl}
                   alt={`${store.name} logo`}
-                  className="h-10 w-10 shrink-0 rounded-lg object-cover ring-1 ring-slate-200"
+                  className="h-11 w-11 shrink-0 rounded-xl object-cover ring-1 ring-slate-200"
                 />
               ) : (
                 <span
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-extrabold text-white"
                   style={{ backgroundColor: accent }}
                 >
                   {store.name.slice(0, 2).toUpperCase()}
                 </span>
               )}
               <span className="min-w-0">
-                <span className="block truncate text-base font-semibold text-slate-900">
+                <span className="block truncate text-sm font-extrabold tracking-tight text-slate-900">
                   {store.name}
                 </span>
                 <span className="block text-xs text-slate-500">Online store</span>
@@ -167,7 +170,7 @@ export default function StorefrontLayout() {
               <nav className="hidden items-center gap-1 sm:flex">
                 <Link
                   to={`/store/${store.slug}`}
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 >
                   Shop
                 </Link>
@@ -178,7 +181,7 @@ export default function StorefrontLayout() {
                         ? `mailto:${store.contactEmail}`
                         : `tel:${store.contactPhone}`
                     }
-                    className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                   >
                     Contact
                   </a>
@@ -188,7 +191,7 @@ export default function StorefrontLayout() {
               <button
                 type="button"
                 onClick={() => setCartOpen(true)}
-                className="relative inline-flex h-10 items-center gap-2 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"
+                className="relative inline-flex h-11 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
               >
                 <ShoppingBag className="h-4 w-4" aria-hidden="true" />
                 <span className="hidden sm:inline">Cart</span>
@@ -202,7 +205,7 @@ export default function StorefrontLayout() {
               <button
                 type="button"
                 onClick={() => setMobileOpen((open) => !open)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 sm:hidden"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 sm:hidden"
                 aria-label="Toggle navigation"
               >
                 {mobileOpen ? (
@@ -243,18 +246,23 @@ export default function StorefrontLayout() {
           <Outlet />
         </main>
 
-        <footer className="border-t border-slate-200 bg-white py-8">
-          <div className="mx-auto max-w-7xl px-4 text-center text-sm text-slate-500 sm:px-6 lg:px-8">
-            <p className="font-medium text-slate-700">{store.name}</p>
-            {store.description ? (
-              <p className="mx-auto mt-1 max-w-2xl">{store.description}</p>
-            ) : null}
-            {store.contactAddress ? (
-              <p className="mt-1">{store.contactAddress}</p>
-            ) : null}
-            <p className="mt-4 text-xs">
-              Powered by OrderFlow AI · Secure order processing
-            </p>
+        <footer className="border-t border-slate-200 bg-white py-12">
+          <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:px-6 lg:px-8">
+            <div className="text-sm text-slate-500">
+              <p className="font-extrabold tracking-tight text-slate-900">{store.name}</p>
+              {store.description ? (
+                <p className="mt-2 max-w-2xl leading-6">{store.description}</p>
+              ) : null}
+              {store.contactAddress ? (
+                <p className="mt-2">{store.contactAddress}</p>
+              ) : null}
+            </div>
+            <div className="text-sm sm:text-right">
+              <p className="sf-kicker">OrderFlow AI</p>
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                Live catalogue prices. Business-approved orders. No payment collected here.
+              </p>
+            </div>
           </div>
         </footer>
 
@@ -266,7 +274,7 @@ export default function StorefrontLayout() {
               className="absolute inset-0 bg-slate-900/40"
               onClick={() => setCartOpen(false)}
             />
-            <aside className="relative flex h-full w-full max-w-md flex-col bg-white shadow-xl">
+            <aside className="relative flex h-full w-full max-w-md flex-col bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
                 <div>
                   <p className="text-base font-semibold text-slate-900">Your cart</p>
@@ -372,7 +380,7 @@ export default function StorefrontLayout() {
                   Final total is confirmed from live catalogue prices at checkout.
                 </p>
                 <Button
-                  className="mt-4 w-full"
+                  className="mt-4 h-11 w-full rounded-xl"
                   disabled={cart.length === 0}
                   onClick={() => {
                     setCartOpen(false);
@@ -400,7 +408,7 @@ export default function StorefrontLayout() {
             <button
               type="button"
               onClick={() => setCartOpen(true)}
-              className="flex items-center gap-2 rounded-full px-4 py-3 text-sm font-semibold text-white shadow-lg"
+              className="flex items-center gap-2 rounded-full px-4 py-3 text-sm font-semibold text-white shadow-xl"
               style={{ backgroundColor: accent }}
             >
               <Badge className="border-0 bg-white/20 text-white ring-0">{cartCount}</Badge>

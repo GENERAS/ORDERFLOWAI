@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, PackageSearch, Search } from 'lucide-react';
+import {
+  Loader2,
+  MessageCircle,
+  PackageSearch,
+  Search,
+  ShieldCheck,
+} from 'lucide-react';
 import { Alert } from '../../components/ui/Alert';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { FormField } from '../../components/ui/FormField';
 import { useStorefront } from './StorefrontContext';
 import StoreProductCard from './components/StoreProductCard';
 import {
@@ -108,77 +113,78 @@ export default function PublicStorefrontPage() {
     <div>
       <section
         className="border-b border-slate-200"
-        style={{ backgroundColor: `${store.brandColor}12` }}
+        style={{ backgroundColor: `${store.brandColor}0b` }}
       >
-        <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-          <p
-            className="text-xs font-semibold uppercase tracking-[0.2em]"
-            style={{ color: store.brandColor }}
-          >
-            Discover our collection
-          </p>
-          <h1 className="mt-3 max-w-3xl text-3xl font-bold tracking-tight text-slate-900 sm:text-5xl">
-            {store.name}
-          </h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-            {store.description ||
-              'Browse current products, check availability and place an order directly with this business.'}
-          </p>
-          <div className="mt-7 max-w-xl">
-            <FormField
-              label="Search products"
-              type="search"
-              placeholder="Search by product, category or code"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              trailing={<Search className="h-4 w-4 text-slate-400" aria-hidden="true" />}
-            />
+        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.6fr)] lg:items-end">
+            <div>
+              <p className="sf-kicker">Curated for you</p>
+              <h1 className="mt-4 max-w-3xl text-4xl font-extrabold tracking-[-0.045em] text-slate-900 sm:text-6xl">
+                {store.name}
+              </h1>
+              <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
+                {store.description ||
+                  'Browse current products, check availability and place an order directly with this business.'}
+              </p>
+
+              <label className="sf-surface mt-8 flex max-w-xl items-center gap-3 px-4 py-3 shadow-sm focus-within:ring-2 focus-within:ring-slate-900/10">
+                <Search className="h-5 w-5 shrink-0 text-slate-400" aria-hidden="true" />
+                <input
+                  type="search"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="Search products, categories or codes"
+                  aria-label="Search products"
+                  className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                />
+              </label>
+            </div>
+
+            <div className="sf-surface p-6 sm:p-7">
+              <p className="text-sm font-bold text-slate-900">A simpler way to order</p>
+              <div className="mt-5 space-y-5">
+                <div className="flex gap-3">
+                  <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 sf-accent-text" aria-hidden="true" />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Live catalogue prices</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Prices and availability are confirmed before your order is created.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <MessageCircle className="mt-0.5 h-5 w-5 shrink-0 sf-accent-text" aria-hidden="true" />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">WhatsApp support</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Continue your order in chat and get confirmation from the business.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setCategoryId(null)}
-              className={`rounded-full px-3.5 py-1.5 text-sm font-medium ${
-                categoryId === null
-                  ? 'text-white'
-                  : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100'
-              }`}
-              style={categoryId === null ? { backgroundColor: store.brandColor } : undefined}
-            >
-              All products
-            </button>
-            {categories.map((category) => (
-              <button
-                key={category.id}
-                type="button"
-                onClick={() => setCategoryId(category.id)}
-                className={`rounded-full px-3.5 py-1.5 text-sm font-medium ${
-                  categoryId === category.id
-                    ? 'text-white'
-                    : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100'
-                }`}
-                style={
-                  categoryId === category.id
-                    ? { backgroundColor: store.brandColor }
-                    : undefined
-                }
-              >
-                {category.name}
-              </button>
-            ))}
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="sf-kicker">The collection</p>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+              Browse all products
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {loading ? 'Loading products…' : `${count} available product${count === 1 ? '' : 's'}`}
+            </p>
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            Sort
+          <label className="flex items-center gap-3 text-sm text-slate-600">
+            <span className="font-medium">Sort by</span>
             <select
               value={sort}
               onChange={(event) => setSort(event.target.value)}
-              className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800"
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 shadow-sm outline-none"
             >
               <option value="featured">Featured</option>
               <option value="newest">Newest</option>
@@ -187,6 +193,34 @@ export default function PublicStorefrontPage() {
               <option value="price_desc">Price: high to low</option>
             </select>
           </label>
+        </div>
+
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setCategoryId(null)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+              categoryId === null
+                ? 'sf-accent-bg text-white shadow-sm'
+                : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            All products
+          </button>
+          {categories.map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              onClick={() => setCategoryId(category.id)}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                categoryId === category.id
+                  ? 'sf-accent-bg text-white shadow-sm'
+                  : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              {category.name}
+            </button>
+          ))}
         </div>
 
         {error ? (
@@ -209,7 +243,7 @@ export default function PublicStorefrontPage() {
           />
         ) : (
           <>
-            <div className="mt-7 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="mt-8 grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
               {products.map((product) => (
                 <StoreProductCard
                   key={product.id}
@@ -220,9 +254,10 @@ export default function PublicStorefrontPage() {
             </div>
 
             {products.length < count ? (
-              <div className="mt-10 flex justify-center">
+              <div className="mt-12 flex justify-center">
                 <Button
                   variant="secondary"
+                  className="h-11 rounded-xl px-6"
                   onClick={handleLoadMore}
                   disabled={loadingMore}
                 >

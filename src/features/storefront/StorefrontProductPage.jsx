@@ -6,6 +6,7 @@ import {
   MessageCircle,
   Minus,
   Plus,
+  ShieldCheck,
   ShoppingBag,
 } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
@@ -171,40 +172,43 @@ export default function StorefrontProductPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
       <Link
         to={`/store/${storeSlug}`}
-        className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900"
+        className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-900"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        Continue shopping
+        Back to collection
       </Link>
 
-      <div className="mt-6 grid gap-8 lg:grid-cols-2">
+      <div className="mt-7 grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] lg:items-start lg:gap-12">
         <div>
-          <div className="aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            {activeImage ? (
-              <img
-                src={activeImage}
-                alt={product.name}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                No image available
-              </div>
-            )}
+          <div className="sf-surface aspect-[4/5] overflow-hidden p-2 sm:p-3">
+            <div className="h-full w-full overflow-hidden rounded-[18px] bg-slate-100">
+              {activeImage ? (
+                <img
+                  src={activeImage}
+                  alt={product.name}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                  No image available
+                </div>
+              )}
+            </div>
           </div>
+
           {product.images.length > 1 ? (
-            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+            <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
               {product.images.map((image) => (
                 <button
                   key={image.path}
                   type="button"
                   onClick={() => setActiveImage(image.url)}
-                  className={`h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 bg-white ${
+                  className={`h-20 w-20 shrink-0 overflow-hidden rounded-2xl border-2 bg-white ${
                     activeImage === image.url
-                      ? 'border-slate-900'
+                      ? 'sf-accent-ring border-transparent'
                       : 'border-transparent ring-1 ring-slate-200'
                   }`}
                   aria-label={`View ${image.alt}`}
@@ -222,17 +226,17 @@ export default function StorefrontProductPage() {
           ) : null}
         </div>
 
-        <div>
+        <div className="sf-surface p-6 sm:p-8 lg:sticky lg:top-24">
           {product.categoryName ? (
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              {product.categoryName}
-            </p>
-          ) : null}
-          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
+            <p className="sf-kicker">{product.categoryName}</p>
+          ) : (
+            <p className="sf-kicker">Product detail</p>
+          )}
+          <h1 className="mt-3 text-3xl font-extrabold tracking-[-0.035em] text-slate-900 sm:text-4xl">
             {product.name}
           </h1>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <Badge variant={getAvailabilityVariant(product.availability)}>
               {getAvailabilityLabel(product.availability)}
             </Badge>
@@ -241,17 +245,22 @@ export default function StorefrontProductPage() {
             ) : null}
           </div>
 
-          <p className="mt-6 text-3xl font-semibold text-slate-900">
-            {product.priceFrom ? 'From ' : ''}
-            {formatCurrency(product.price, { currency: product.currency })}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Prices are confirmed from the live catalogue when you check out.
-          </p>
+          <div className="mt-6 flex items-end justify-between gap-4 border-b border-slate-100 pb-6">
+            <div>
+              <p className="text-xs font-medium text-slate-500">Price</p>
+              <p className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
+                {product.priceFrom ? 'From ' : ''}
+                {formatCurrency(product.price, { currency: product.currency })}
+              </p>
+            </div>
+            <p className="max-w-[180px] text-right text-[11px] leading-4 text-slate-400">
+              Confirmation happens at checkout from live catalogue prices.
+            </p>
+          </div>
 
           {product.description ? (
-            <div className="mt-7">
-              <h2 className="text-sm font-semibold text-slate-900">Description</h2>
+            <div className="mt-6">
+              <h2 className="text-sm font-bold text-slate-900">About this product</h2>
               <p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-600">
                 {product.description}
               </p>
@@ -260,7 +269,7 @@ export default function StorefrontProductPage() {
 
           {product.variants.length > 0 ? (
             <div className="mt-7">
-              <h2 className="text-sm font-semibold text-slate-900">Available options</h2>
+              <h2 className="text-sm font-bold text-slate-900">Choose an option</h2>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {product.variants.map((variant) => (
                   <button
@@ -268,14 +277,16 @@ export default function StorefrontProductPage() {
                     type="button"
                     disabled={!variant.inStock}
                     onClick={() => setSelectedVariantId(variant.id)}
-                    className={`rounded-xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                    className={`rounded-2xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
                       selectedVariantId === variant.id
-                        ? 'border-slate-900 bg-slate-900 text-white'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
+                        ? 'sf-accent-ring border-transparent bg-slate-50'
+                        : 'border-slate-200 bg-white hover:border-slate-400'
                     }`}
                   >
-                    <span className="block text-sm font-medium">{variant.name}</span>
-                    <span className="mt-0.5 block text-xs opacity-80">
+                    <span className="block text-sm font-semibold text-slate-900">
+                      {variant.name}
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-500">
                       {formatCurrency(variant.price, { currency: product.currency })}
                       {!variant.inStock ? ' · Out of stock' : ''}
                     </span>
@@ -285,22 +296,22 @@ export default function StorefrontProductPage() {
             </div>
           ) : null}
 
-          <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center rounded-lg border border-slate-300">
+          <div className="mt-7">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="inline-flex h-11 items-center rounded-xl border border-slate-200 bg-white">
                 <button
                   type="button"
                   onClick={() => setQuantity((value) => Math.max(1, value - 1))}
-                  className="p-2.5 text-slate-600 hover:text-slate-900"
+                  className="p-3 text-slate-600 hover:text-slate-900"
                   aria-label="Decrease quantity"
                 >
                   <Minus className="h-4 w-4" aria-hidden="true" />
                 </button>
-                <span className="w-10 text-center text-sm font-medium">{quantity}</span>
+                <span className="w-10 text-center text-sm font-semibold">{quantity}</span>
                 <button
                   type="button"
                   onClick={() => setQuantity((value) => Math.min(100, value + 1))}
-                  className="p-2.5 text-slate-600 hover:text-slate-900"
+                  className="p-3 text-slate-600 hover:text-slate-900"
                   aria-label="Increase quantity"
                 >
                   <Plus className="h-4 w-4" aria-hidden="true" />
@@ -308,7 +319,7 @@ export default function StorefrontProductPage() {
               </div>
 
               <Button
-                className="flex-1"
+                className="h-11 flex-1 rounded-xl"
                 disabled={!inStock}
                 onClick={handleAddToCart}
                 style={{ backgroundColor: inStock ? store.brandColor : undefined }}
@@ -318,9 +329,9 @@ export default function StorefrontProductPage() {
               </Button>
             </div>
 
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mt-4 rounded-2xl bg-slate-50 p-4">
               <Button
-                className="w-full"
+                className="h-11 w-full rounded-xl"
                 variant="secondary"
                 disabled={!inStock || whatsappBusy}
                 onClick={handleOrderOnWhatsApp}
@@ -341,8 +352,8 @@ export default function StorefrontProductPage() {
                 </p>
               ) : null}
               {whatsappReference ? (
-                <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
-                  <p className="text-xs font-medium text-slate-700">Secure checkout link</p>
+                <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-semibold text-slate-700">Secure checkout link</p>
                   <input
                     readOnly
                     value={buildCheckoutUrl(whatsappReference.checkoutPath)}
@@ -362,14 +373,18 @@ export default function StorefrontProductPage() {
               ) : null}
             </div>
 
-            <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-sm">
+            <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-5 text-sm">
               <span className="text-slate-500">Line total</span>
-              <span className="font-semibold text-slate-900">
+              <span className="font-bold text-slate-900">
                 {formatCurrency(getCartSubtotal([{ price: unitPrice, quantity }]), {
                   currency: product.currency,
                 })}
               </span>
             </div>
+            <p className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+              <ShieldCheck className="h-4 w-4 sf-accent-text" aria-hidden="true" />
+              No payment is collected on this page.
+            </p>
           </div>
         </div>
       </div>
