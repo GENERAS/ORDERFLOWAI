@@ -84,7 +84,18 @@ async function authenticateUser(request, supabaseUrl, anonKey) {
   return { client, user: data.user };
 }
 
-function toolRpcArguments(name, argumentsValue, businessId) {
+const ORDER_TOOL_NAMES = new Set([
+  'get_customer_information',
+  'prepare_order_draft',
+  'update_order_draft',
+  'calculate_order_quote',
+  'get_order_summary',
+  'request_customer_confirmation',
+  'submit_confirmed_order_for_business_approval',
+  'ai_search_order_preparations',
+]);
+
+function toolRpcArguments(name, argumentsValue, businessId, context) {
   const base = { p_business_id: businessId };
 
   if (name === 'search_products') {
@@ -109,6 +120,78 @@ function toolRpcArguments(name, argumentsValue, businessId) {
       ...base,
       p_order_number: argumentsValue.order_number,
       p_verification: argumentsValue.verification,
+    };
+  }
+  if (name === 'get_customer_information') {
+    return {
+      ...base,
+      p_customer_id: argumentsValue.customer_id ?? null,
+      p_phone: argumentsValue.phone ?? null,
+      p_email: argumentsValue.email ?? null,
+      p_conversation_id: context.conversationId ?? null,
+    };
+  }
+  if (name === 'prepare_order_draft') {
+    return {
+      ...base,
+      p_conversation_id: context.conversationId ?? null,
+      p_customer_id: null,
+      p_customer_name: argumentsValue.customer_name ?? null,
+      p_customer_phone: argumentsValue.customer_phone ?? null,
+      p_customer_email: argumentsValue.customer_email ?? null,
+      p_items: JSON.stringify(argumentsValue.items ?? []),
+      p_delivery_method: argumentsValue.delivery_method ?? null,
+      p_delivery_address: argumentsValue.delivery_address ?? null,
+      p_delivery_instructions: argumentsValue.delivery_instructions ?? null,
+      p_notes: argumentsValue.notes ?? null,
+      p_idempotency_key: context.idempotencyKey,
+    };
+  }
+  if (name === 'update_order_draft') {
+    return {
+      p_order_id: argumentsValue.order_id,
+      p_items: argumentsValue.items ? JSON.stringify(argumentsValue.items) : null,
+      p_customer_name: argumentsValue.customer_name ?? null,
+      p_customer_phone: argumentsValue.customer_phone ?? null,
+      p_customer_email: argumentsValue.customer_email ?? null,
+      p_delivery_method: argumentsValue.delivery_method ?? null,
+      p_delivery_address: argumentsValue.delivery_address ?? null,
+      p_delivery_instructions: argumentsValue.delivery_instructions ?? null,
+      p_notes: argumentsValue.notes ?? null,
+      p_idempotency_key: context.idempotencyKey,
+    };
+  }
+  if (name === 'calculate_order_quote') {
+    return {
+      p_order_id: argumentsValue.order_id,
+      p_idempotency_key: context.idempotencyKey,
+    };
+  }
+  if (name === 'get_order_summary') {
+    return { p_order_id: argumentsValue.order_id };
+  }
+  if (name === 'request_customer_confirmation') {
+    return {
+      p_order_id: argumentsValue.order_id,
+      p_idempotency_key: context.idempotencyKey,
+    };
+  }
+  if (name === 'submit_confirmed_order_for_business_approval') {
+    return {
+      p_order_id: argumentsValue.order_id,
+      p_confirmation_text: context.message,
+      p_confirmation_source: 'chat_message',
+      p_confirmation_reference: context.requestId,
+      p_idempotency_key: context.idempotencyKey,
+    };
+  }
+  if (name === 'ai_search_order_preparations') {
+    return {
+      ...base,
+      p_search: argumentsValue.search ?? null,
+      p_status: argumentsValue.status ?? null,
+      p_limit: argumentsValue.limit ?? 25,
+      p_offset: 0,
     };
   }
   return base;
@@ -186,6 +269,54 @@ function collectSourceRecords(name, result, sources) {
       record: result,
     });
   }
+
+  if (name === 'get_customer_information' && result.found && result.customerId) {
+    sources.set(`customer:${result.customerId}`, {
+      type: 'customer',
+      id: result.customerId,
+      label: result.name ?? result.customerId,
+      record: result,
+    });
+  }
+
+  if (result?.order?.id) {
+    sources.set(`order:${result.order.id}`, {
+      type: 'order',
+      id: result.order.id,
+      label: result.order.orderNumber ?? result.order.id,
+      record: result.order,
+    });
+  }
+
+  if (result?.quote?.id) {
+    sources.set(`quote:${result.quote.id}`, {
+      type: 'quote',
+      id: result.quote.id,
+      label: `Quote version ${result.quote.version ?? '?'}`,
+      record: result.quote,
+    });
+  }
+
+  if (result?.preparation?.id) {
+    sources.set(`preparation:${result.preparation.id}`, {
+      type: 'preparation',
+      id: result.preparation.id,
+      label: `Order preparation ${result.preparation.id}`,
+      record: result.preparation,
+    });
+  }
+
+  if (name === 'ai_search_order_preparations' && Array.isArray(result.items)) {
+    for (const item of result.items) {
+      if (!item?.orderId) continue;
+      sources.set(`order:${item.orderId}`, {
+        type: 'order',
+        id: item.orderId,
+        label: item.orderNumber ?? item.orderId,
+        record: item,
+      });
+    }
+  }
 }
 
 async function resolveProductImageUrls(serviceClient, sourceRecords) {
@@ -222,7 +353,16 @@ async function resolveProductImageUrls(serviceClient, sourceRecords) {
   }
 }
 
-async function executeTool({ name, args, businessId, userClient, serviceClient, sources, toolCalls }) {
+async function executeTool({
+  name,
+  args,
+  businessId,
+  context,
+  userClient,
+  serviceClient,
+  sources,
+  toolCalls,
+}) {
   const validation = validateToolCall({ name, arguments: args });
   if (!validation.ok) {
     const result = { ok: false, error: validation.error };
@@ -230,9 +370,13 @@ async function executeTool({ name, args, businessId, userClient, serviceClient, 
     return { ok: false, name, result };
   }
 
+  const idempotencyContext = {
+    ...context,
+    idempotencyKey: `${context.requestId}:${context.commandIndex}:${validation.name}`.slice(0, 128),
+  };
   const { data, error } = await userClient.rpc(
     validation.name,
-    toolRpcArguments(validation.name, validation.value, businessId),
+    toolRpcArguments(validation.name, validation.value, businessId, idempotencyContext),
   );
 
   const result = error
@@ -459,6 +603,11 @@ Deno.serve(async (request) => {
     const language = resolveLanguage(requestedLanguage, detection.language);
     const sources = new Map();
     const toolCalls = [];
+    const toolContext = {
+      conversationId: activeConversationId,
+      message,
+      requestId,
+    };
 
     const history = Array.isArray(context.messages)
       ? context.messages
@@ -486,11 +635,12 @@ Deno.serve(async (request) => {
     });
 
     if (Array.isArray(firstResponse.toolCalls) && firstResponse.toolCalls.length > 0) {
-      for (const call of firstResponse.toolCalls.slice(0, 5)) {
+      for (const [index, call] of firstResponse.toolCalls.slice(0, 5).entries()) {
         const outcome = await executeTool({
           name: call.name,
           args: call.arguments,
           businessId,
+          context: { ...toolContext, commandIndex: index + 1 },
           userClient,
           serviceClient,
           sources,
@@ -504,6 +654,7 @@ Deno.serve(async (request) => {
           name: 'get_business_information',
           args: {},
           businessId,
+          context: { ...toolContext, commandIndex: 101 },
           userClient,
           serviceClient,
           sources,
@@ -513,6 +664,7 @@ Deno.serve(async (request) => {
           name: 'search_products',
           args: { query: message, limit: 8 },
           businessId,
+          context: { ...toolContext, commandIndex: 102 },
           userClient,
           serviceClient,
           sources,
@@ -573,6 +725,14 @@ Deno.serve(async (request) => {
       return Number(((firstCost ?? 0) + (finalCost ?? 0)).toFixed(8));
     })();
     const latencyMs = Date.now() - startedAt;
+    const orderToolCalls = toolCalls.filter((call) => ORDER_TOOL_NAMES.has(call.name));
+    const latestOrderResult = [...orderToolCalls]
+      .reverse()
+      .map((call) => call.execution?.result ?? call.result)
+      .find((result) => result?.order || Array.isArray(result?.items)) ?? null;
+    const orderResult = latestOrderResult?.order ?? null;
+    const preparationResult = latestOrderResult?.preparation ?? null;
+    const quoteResult = latestOrderResult?.quote ?? null;
 
     const response = {
       answer: parsed.answer,
@@ -599,8 +759,28 @@ Deno.serve(async (request) => {
       })),
       sources: linkedSources,
       sourceIds: parsed.sourceIds,
+      orderId: parsed.orderId ?? orderResult?.id ?? null,
+      quoteId: parsed.quoteId ?? quoteResult?.id ?? null,
+      orderStatus: parsed.orderStatus ?? orderResult?.status ?? null,
+      preparationStatus: parsed.preparationStatus ?? preparationResult?.status ?? null,
+      requiresCustomerConfirmation:
+        parsed.requiresCustomerConfirmation
+        || preparationResult?.status === 'awaiting_customer_confirmation',
+      businessApprovalRequired:
+        parsed.businessApprovalRequired
+        || orderResult?.status === 'awaiting_business_approval',
+      stockChanged: parsed.stockChanged || orderResult?.stockState === 'reserved',
+      commerceAction: latestOrderResult
+        ? {
+          action: latestOrderResult.action ?? null,
+          accepted: latestOrderResult.accepted ?? null,
+          requiresReconfirmation: latestOrderResult.requiresReconfirmation ?? false,
+          customerConfirmed: Boolean(orderResult?.customerConfirmedAt),
+          businessApprovalRequired: orderResult?.status === 'awaiting_business_approval',
+        }
+        : null,
       generatedAt: new Date().toISOString(),
-      readOnly: true,
+      readOnly: orderToolCalls.length === 0,
     };
 
     const turnResult = await userClient.rpc('ai_record_assistant_turn', {

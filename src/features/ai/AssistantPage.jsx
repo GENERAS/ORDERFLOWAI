@@ -47,6 +47,9 @@ function sourceLabel(source) {
   if (source.type === 'policy') return source.label;
   if (source.type === 'business') return 'Business information';
   if (source.type === 'order') return `Order ${source.id}`;
+  if (source.type === 'quote') return `Quote ${source.id}`;
+  if (source.type === 'preparation') return 'Order preparation';
+  if (source.type === 'customer') return source.record?.name ?? 'Customer';
   return source.label;
 }
 
@@ -112,6 +115,38 @@ function AssistantMessage({ message }) {
             ))}
           </div>
         ) : null}
+        {isAssistant && (message.orderId || message.quoteId) ? (
+          <div className="space-y-2 border-t border-slate-100 pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Order preparation
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {message.orderId ? (
+                <Badge variant="brand">Draft {message.orderId.slice(0, 8)}</Badge>
+              ) : null}
+              {message.quoteId ? (
+                <Badge variant="neutral">Quote {message.quoteId.slice(0, 8)}</Badge>
+              ) : null}
+              {message.orderStatus ? (
+                <Badge variant="neutral">{message.orderStatus.replaceAll('_', ' ')}</Badge>
+              ) : null}
+              {message.preparationStatus ? (
+                <Badge variant="neutral">{message.preparationStatus.replaceAll('_', ' ')}</Badge>
+              ) : null}
+              {message.requiresCustomerConfirmation ? (
+                <Badge variant="warning">Customer review required</Badge>
+              ) : null}
+              {message.businessApprovalRequired ? (
+                <Badge variant="warning">Business approval required</Badge>
+              ) : null}
+            </div>
+            <p className="text-[11px] text-slate-400">
+              {message.stockChanged
+                ? 'Backend stock state changed.'
+                : 'No stock was reserved or consumed by this assistant.'}
+            </p>
+          </div>
+        ) : null}
         {isAssistant && message.usage ? (
           <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-400">
             <Badge variant="neutral">{message.provider}</Badge>
@@ -142,7 +177,11 @@ export default function AssistantPage() {
   const hasWorkspace = Boolean(businessId && activeMembership);
   const canSend = hasWorkspace && input.trim().length > 0 && !submitting;
   const status = useMemo(
-    () => (submitting ? 'Thinking with verified business data...' : 'Read-only assistant'),
+    () => (
+      submitting
+        ? 'Working with verified business data...'
+        : 'Draft-only assistant - customer confirmation and business approval still required'
+    ),
     [submitting],
   );
 
@@ -192,6 +231,13 @@ export default function AssistantPage() {
           provider: result.provider,
           model: result.model,
           handover: result.handover,
+          orderId: result.orderId,
+          quoteId: result.quoteId,
+          orderStatus: result.orderStatus,
+          preparationStatus: result.preparationStatus,
+          requiresCustomerConfirmation: result.requiresCustomerConfirmation,
+          businessApprovalRequired: result.businessApprovalRequired,
+          stockChanged: result.stockChanged,
         },
       ]);
     } catch (assistantError) {
@@ -215,12 +261,13 @@ export default function AssistantPage() {
             </h2>
             <Badge variant="brand">
               <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-              Read-only
+              Draft-only
             </Badge>
           </div>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-500">
-            Ask about real products, prices, availability, policies and order status. Answers come
-            from verified workspace records; the assistant cannot create orders or change stock.
+            Ask about real products, prices, availability, policies and order status. The assistant
+            can prepare order drafts and present quotes, but a customer must confirm explicitly and
+            the business must approve before any stock is reserved.
           </p>
         </div>
         <Button variant="secondary" onClick={resetSession} disabled={submitting}>
@@ -252,7 +299,7 @@ export default function AssistantPage() {
               <EmptyState
                 icon={Sparkles}
                 title="Ask a product or order question"
-                description="Try “What products do you have under 20,000 RWF?” or “Do you have stock?” Answers are grounded in this workspace only."
+                description="Try “What products do you have under 20,000 RWF?”, “Prepare a draft for two of them”, or “Do you have stock?” Drafts always need confirmation and approval."
               />
             ) : (
               <div className="space-y-5" aria-live="polite">
@@ -320,10 +367,10 @@ export default function AssistantPage() {
             </CardHeader>
             <CardContent>
               <ul className="space-y-2 text-sm text-slate-500">
-                <li>Create or approve orders</li>
+                <li>Approve orders or record customer confirmation without explicit words</li>
                 <li>Reserve, release or consume stock</li>
-                <li>Record payments or issue refunds</li>
-                <li>Change customer records or send messages</li>
+                <li>Record payments, refunds or deliveries</li>
+                <li>Change stock, catalogue or policy records</li>
                 <li>Answer from data outside this workspace</li>
               </ul>
             </CardContent>

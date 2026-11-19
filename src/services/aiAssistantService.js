@@ -72,6 +72,74 @@ export function getAIAssistantErrorMessage(error) {
     'The assistant request could not be completed.';
 }
 
+function createActionKey(prefix) {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}:${suffix}`.slice(0, 128);
+}
+
+function unwrapRpcData(data) {
+  return Array.isArray(data) ? data[0] : data;
+}
+
+async function callOrderRpc(name, params) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc(name, params);
+  if (error) throw await toAIAssistantServiceError(error);
+  return unwrapRpcData(data);
+}
+
+export async function listAIPreparations({
+  businessId,
+  status = null,
+  search = '',
+  limit = 25,
+}) {
+  return callOrderRpc('ai_search_order_preparations', {
+    p_business_id: businessId,
+    p_status: status || null,
+    p_search: search || null,
+    p_limit: limit,
+    p_offset: 0,
+  });
+}
+
+export async function getAIOrderSummary(orderId) {
+  return callOrderRpc('get_order_summary', { p_order_id: orderId });
+}
+
+export async function approveAIOrder(orderId) {
+  return callOrderRpc('approve_prepared_order', {
+    p_order_id: orderId,
+    p_idempotency_key: createActionKey('approve'),
+  });
+}
+
+export async function rejectAIOrder(orderId, reason) {
+  return callOrderRpc('reject_prepared_order', {
+    p_order_id: orderId,
+    p_reason: reason,
+    p_idempotency_key: createActionKey('reject'),
+  });
+}
+
+export async function requestAIOrderClarification(orderId, reason) {
+  return callOrderRpc('request_order_clarification', {
+    p_order_id: orderId,
+    p_reason: reason,
+    p_idempotency_key: createActionKey('clarify'),
+  });
+}
+
+export async function cancelAIOrderDraft(orderId, reason) {
+  return callOrderRpc('cancel_order_draft', {
+    p_order_id: orderId,
+    p_reason: reason,
+    p_idempotency_key: createActionKey('cancel'),
+  });
+}
+
 export async function askAIAssistant({
   businessId,
   message,

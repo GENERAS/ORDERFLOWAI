@@ -1,22 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDownUp,
+  CheckCircle2,
   CircleDollarSign,
   ClipboardList,
   Loader2,
+  MessageCircleQuestion,
   PackageCheck,
   Plus,
   Search,
   ShoppingCart,
   Timer,
+  XCircle,
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { Alert } from '../../components/ui/Alert';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { FormField } from '../../components/ui/FormField';
 import { SelectField } from '../../components/ui/SelectField';
+import {
+  approveAIOrder,
+  cancelAIOrderDraft,
+  getAIAssistantErrorMessage,
+  listAIPreparations,
+  rejectAIOrder,
+  requestAIOrderClarification,
+} from '../../services/aiAssistantService';
 import {
   getOrderOverview,
   searchOrders,
@@ -72,6 +90,11 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(() => location.state?.message ?? '');
+  const [preparations, setPreparations] = useState([]);
+  const [preparationsLoading, setPreparationsLoading] = useState(true);
+  const [preparationError, setPreparationError] = useState('');
+  const [busyPreparation, setBusyPreparation] = useState(null);
+  const [preparationRefresh, setPreparationRefresh] = useState(0);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -99,6 +122,32 @@ export default function OrdersPage() {
       active = false;
     };
   }, [businessId]);
+
+  useEffect(() => {
+    let active = true;
+    if (!businessId) return undefined;
+
+    Promise.resolve().then(() => {
+      if (active) setPreparationsLoading(true);
+    });
+    listAIPreparations({ businessId, status: 'customer_confirmed', limit: 10 })
+      .then((result) => {
+        if (!active) return;
+        setPreparations(Array.isArray(result?.items) ? result.items : []);
+        setPreparationError('');
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        setPreparationError(getAIAssistantErrorMessage(loadError));
+      })
+      .finally(() => {
+        if (active) setPreparationsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [businessId, preparationRefresh]);
 
   useEffect(() => {
     let active = true;
@@ -177,6 +226,46 @@ export default function OrdersPage() {
   const changePage = (nextPage) => {
     setLoading(true);
     setPage(nextPage);
+  };
+
+  const runPreparationAction = async (item, action) => {
+    if (!item?.orderId) return;
+
+    const reasonPrompts = {
+      reject: 'Reason for rejecting this order?',
+      clarify: 'What needs clarification?',
+      cancel: 'Reason for cancelling this draft?',
+    };
+    let reason = null;
+    if (reasonPrompts[action]) {
+      const entered = window.prompt(reasonPrompts[action]);
+      if (!entered?.trim()) return;
+      reason = entered.trim().slice(0, 500);
+    }
+
+    const actionKey = `${action}:${item.orderId}`;
+    setBusyPreparation(actionKey);
+    setPreparationError('');
+
+    try {
+      if (action === 'approve') await approveAIOrder(item.orderId);
+      if (action === 'reject') await rejectAIOrder(item.orderId, reason);
+      if (action === 'clarify') await requestAIOrderClarification(item.orderId, reason);
+      if (action === 'cancel') await cancelAIOrderDraft(item.orderId, reason);
+
+      const successMessages = {
+        approve: `${item.orderNumber} approved. Stock was reserved by the backend.`,
+        reject: `${item.orderNumber} rejected and cancelled.`,
+        clarify: `${item.orderNumber} returned for customer clarification.`,
+        cancel: `${item.orderNumber} draft cancelled.`,
+      };
+      setSuccess(successMessages[action]);
+      setPreparationRefresh((value) => value + 1);
+    } catch (actionError) {
+      setPreparationError(getAIAssistantErrorMessage(actionError));
+    } finally {
+      setBusyPreparation(null);
+    }
   };
 
   const hasFilters =
@@ -281,6 +370,95 @@ export default function OrdersPage() {
           </div>
         </Alert>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle as="h2">AI order approval queue</CardTitle>
+            <CardDescription>
+              Customer-confirmed drafts are held here. Approve or reject through the existing
+              order lifecycle; the assistant never reserves stock itself.
+            </CardDescription>
+          </div>
+          <Badge variant="warning">{preparations.length} awaiting review</Badge>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {preparationError ? <Alert variant="error">{preparationError}</Alert> : null}
+          {preparationsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Loading AI-prepared orders...
+            </div>
+          ) : null}
+          {!preparationsLoading && preparations.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No AI-prepared orders are waiting for business approval.
+            </p>
+          ) : null}
+          {preparations.map((item) => {
+            const statusBadge = getOrderStatusBadge(item.orderStatus);
+            const approveKey = `approve:${item.orderId}`;
+            return (
+              <article
+                key={item.preparationId ?? item.orderId}
+                className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      to={`/orders/${item.orderId}`}
+                      className="text-sm font-semibold text-brand-700 hover:underline"
+                    >
+                      {item.orderNumber}
+                    </Link>
+                    <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+                    {item.channel ? <Badge variant="neutral">{item.channel}</Badge> : null}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Quote v{item.quoteVersion ?? '?'} -
+                    {' '}
+                    {formatCurrency(item.total ?? 0, { currency: item.currency })}
+                    {' '}
+                    - confirmed {formatDateTime(item.customerConfirmedAt)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    disabled={Boolean(busyPreparation)}
+                    onClick={() => runPreparationAction(item, 'approve')}
+                  >
+                    {busyPreparation === approveKey ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={Boolean(busyPreparation)}
+                    onClick={() => runPreparationAction(item, 'clarify')}
+                  >
+                    <MessageCircleQuestion className="h-3.5 w-3.5" aria-hidden="true" />
+                    Clarify
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={Boolean(busyPreparation)}
+                    onClick={() => runPreparationAction(item, 'reject')}
+                  >
+                    <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                    Reject
+                  </Button>
+                </div>
+              </article>
+            );
+          })}
+        </CardContent>
+      </Card>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
