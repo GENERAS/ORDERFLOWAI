@@ -182,7 +182,7 @@ export default function InboxPage() {
         search: debouncedSearch || undefined,
         limit: PAGE_SIZE,
       });
-      setConversations(result);
+      setConversations(result.filter((conversation) => conversation.channel !== 'ai_assistant'));
     } catch (loadError) {
       setError(toCommunicationServiceError(loadError).message);
     } finally {

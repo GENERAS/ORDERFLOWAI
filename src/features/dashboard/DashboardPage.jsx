@@ -28,6 +28,7 @@ const stats = [
 ];
 
 const nextSteps = [
+  { to: '/assistant', label: 'Test the read-only AI assistant', icon: Sparkles },
   { to: '/products', label: 'Add products and photos', icon: Package },
   { to: '/inventory', label: 'Configure stock', icon: Boxes },
   { to: '/inbox', label: 'Capture customer inquiries', icon: Inbox },

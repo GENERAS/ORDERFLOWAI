@@ -4,7 +4,7 @@ AI-powered product discovery and order automation for businesses. OrderFlow AI c
 customer conversations to a business's real product catalogue, order records, inventory and
 payments through a single multi-tenant SaaS workspace.
 
-> **Current status: Day 11 — communication infrastructure.**
+> **Current status: Day 12 — AI commerce foundation.**
 > The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
 > a real product catalogue, live inventory with physical, reserved and available stock,
 > customer profiles with status, tags, note history, activity and duplicate overrides, orders
@@ -12,9 +12,10 @@ payments through a single multi-tenant SaaS workspace.
 > lifecycle rules and automatic stock reservations, independent payment tracking with partial
 > payments, verification, refunds, payment history and currency-aware reporting, public
 > per-business storefronts with anonymous catalogue browsing and real order submission, a central
-> media layer for product images and store logos, and a provider-independent channel/inbox layer
-> with official Meta WhatsApp Cloud API code paths. No WhatsApp account or Cloudinary account is
-> claimed connected until real credentials and live tests are completed. AI remains a later phase.
+> media layer for product images and store logos, a provider-independent channel/inbox layer
+> with official Meta WhatsApp Cloud API code paths, and a read-only AI commerce assistant grounded
+> in verified workspace records. No WhatsApp account, Cloudinary account or AI provider is claimed
+> connected until real credentials, deployment and live tests are completed.
 
 ## What is included in this build
 
@@ -77,7 +78,9 @@ payments through a single multi-tenant SaaS workspace.
   unread state, opt-outs and 24-hour service-window/template enforcement.
 - Idempotent webhook and outbound-message processing with audited delivery states and cross-tenant denial.
 - Shared domain constants and JSDoc types for future features.
-- ESLint configuration, auth/catalogue/inventory/customer/order/media/communication integration tests
+- Read-only AI commerce assistant with a provider-independent backend, seven allowlisted tools,
+  strict JSON output, source validation, handover awareness, usage limits and no browser secrets.
+- ESLint configuration, auth/catalogue/inventory/customer/order/media/communication/AI integration tests
   and a documented Supabase setup workflow.
 
 ## Technology stack
@@ -90,8 +93,8 @@ payments through a single multi-tenant SaaS workspace.
 | Auth | Supabase Auth (email/password) |
 | Database | Supabase PostgreSQL with Row Level Security |
 | Storage | Supabase Storage or Cloudinary through one media adapter layer, with signed delivery URLs |
-| Backend functions | Supabase Edge Functions (Cloudinary media signing, deletion and cleanup; Meta WhatsApp connect/webhook/send/media; AI workflows later) |
-| AI | Provider selected in a later phase, called only from backend functions |
+| Backend functions | Supabase Edge Functions (Cloudinary media signing, deletion and cleanup; Meta WhatsApp connect/webhook/send/media; read-only AI commerce assistant) |
+| AI | Provider-independent backend adapter, default `none`, called only from Edge Functions with no browser secrets |
 | Deployment | Vercel-compatible static build |
 
 Only one database is used: Supabase PostgreSQL. No secondary database or premature
@@ -150,6 +153,7 @@ data-backed feature will remain unavailable until credentials are added.
 | `npm run test:storefront` | Run Day 9 storefront, checkout, stock reservation, image access and RLS integration tests (requires `.env.local` and the DB password) |
 | `npm run test:media` | Run Day 10 media provider, upload lifecycle, storage, public access, RLS and cleanup integration tests (requires `.env.local` and the DB password) |
 | `npm run test:comms` | Run Day 11 channel, signature, webhook, inbox, message, media-access, opt-out and RLS integration tests (requires `.env.local` and the DB password) |
+| `npm run test:ai` | Run Day 12 provider, tool, grounding, handover, usage, idempotency and RLS integration tests (requires `.env.local` and the DB password) |
 
 ## Environment variables
 
@@ -185,6 +189,8 @@ mailer, which is rate-limited to two auth emails per hour.
   only. The browser never receives them and Cloudinary is not connected until they are deployed.
 - `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` and `SUPABASE_SERVICE_ROLE_KEY` are Edge Function
   secrets only. The browser receives only the public Meta app/config IDs.
+- `AI_PROVIDER`, `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` and all other `AI_*` settings are Edge
+  Function secrets only. The assistant defaults to `none` until a real provider is configured.
 - Channel credentials live in `private.channel_credentials`; authenticated users cannot read tokens and
   service-role RPCs are reserved for deployed server-to-server flows.
 
@@ -209,6 +215,7 @@ src/
     onboarding/               Business workspace setup
     workspaces/               Multi-workspace picker
     dashboard/                Dashboard page and dashboard-specific components
+    ai/                       Read-only AI assistant conversation page
     channels/                 Channel status and Meta WhatsApp Embedded Signup UI
     inbox/                    Shared inbox, conversation history, composer, assignment and status controls
     orders/                   Order list, editor, detail, status actions, services and helpers
@@ -235,6 +242,7 @@ src/
     mediaStorageManager.js    Provider-independent media upload, delete, usage and URL manager
     media/                    Cloudinary/Supabase adapters, URL resolution and media error mapping
     communicationService.js   Channel, conversation, message, send, media, assignment and opt-out API
+    aiAssistantService.js     Read-only assistant function invocation and error mapping
     baseService.js            Paginated data-access layer and retry helper
   types/
     index.js                  Domain constants and JSDoc typedefs
@@ -249,12 +257,16 @@ scripts/
   day9-storefront-tests.mjs   Storefront, checkout, stock reservation, image access and RLS integration tests
   day10-media-tests.mjs       Media provider, upload lifecycle, access, usage and RLS integration tests
   day11-communication-tests.mjs Channel, webhook, inbox, message, media-access, opt-out and RLS tests
+  day12-ai-commerce-tests.mjs Provider, tool, grounding, handover, usage and RLS tests
 ```
 
 Edge functions live in `supabase/functions/media-manager/index.ts`,
 `supabase/functions/whatsapp-connect/index.ts`, `supabase/functions/whatsapp-webhook/index.ts`
-(with shared `signature.js`), `supabase/functions/whatsapp-send/index.ts` and
-`supabase/functions/whatsapp-media/index.ts`.
+(with shared `signature.js`), `supabase/functions/whatsapp-send/index.ts`,
+`supabase/functions/whatsapp-media/index.ts` and
+`supabase/functions/ai-commerce-assistant/index.ts` with shared `_shared/ai-provider.js` and
+`_shared/ai-tools.js` adapters. See `docs/day12-ai-commerce-foundation.md` for AI secrets and
+deployment notes.
 
 ### Architectural rules
 
@@ -295,6 +307,9 @@ Edge functions live in `supabase/functions/media-manager/index.ts`,
 - **Server-owned communication writes.** Channel connections, conversations, messages, delivery states,
   opt-outs and audit records change through validated security-definer RPCs; the browser cannot write
   credentials or fabricate provider statuses.
+- **Read-only AI.** The assistant uses seven allowlisted tools and never receives write RPCs. Provider
+  calls happen only in an Edge Function, outputs are parsed as strict JSON, and cited source ids are
+  validated against tool results before returning.
 - **Lazy routes.** Pages are code-split via `React.lazy` to keep the initial bundle small.
 - **Shared navigation config.** `src/config/navigation.js` drives both the sidebar and the
   header title so routes cannot drift apart.

@@ -65,7 +65,7 @@ export default function ChannelsPage() {
 
     try {
       const result = await listChannels(businessId);
-      setChannels(result);
+      setChannels(result.filter((channel) => channel.channel !== 'ai_assistant'));
       setError('');
     } catch (loadError) {
       setError(toCommunicationServiceError(loadError).message);

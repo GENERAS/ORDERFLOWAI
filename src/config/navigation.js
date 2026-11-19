@@ -8,6 +8,7 @@ import {
   Package,
   Settings,
   ShoppingCart,
+  Sparkles,
   Store,
   Users,
   UsersRound,
@@ -15,6 +16,7 @@ import {
 
 export const navigationItems = Object.freeze([
   { label: 'Overview', to: '/overview', icon: LayoutDashboard },
+  { label: 'AI Assistant', to: '/assistant', icon: Sparkles },
   { label: 'Inbox', to: '/inbox', icon: Inbox },
   { label: 'Channels', to: '/channels', icon: MessageCircleMore },
   { label: 'Orders', to: '/orders', icon: ShoppingCart },
