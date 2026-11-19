@@ -1,5 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Loader2, Minus, Plus, ShoppingBag } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  Copy,
+  Loader2,
+  MessageCircle,
+  Minus,
+  Plus,
+  ShoppingBag,
+} from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Alert } from '../../components/ui/Alert';
 import { Badge } from '../../components/ui/Badge';
@@ -7,11 +15,14 @@ import { Button } from '../../components/ui/Button';
 import { formatCurrency } from '../../utils/format';
 import { useStorefront } from './StorefrontContext';
 import {
+  buildCheckoutUrl,
+  buildWhatsAppHandoffUrl,
   getAvailabilityLabel,
   getAvailabilityVariant,
   getCartSubtotal,
 } from './storefrontUtils';
 import {
+  createStorefrontCheckoutReference,
   getStorefrontProduct,
   toStorefrontServiceError,
 } from './storefrontService';
@@ -25,6 +36,11 @@ export default function StorefrontProductPage() {
   const [activeImage, setActiveImage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [whatsappBusy, setWhatsappBusy] = useState(false);
+  const [whatsappError, setWhatsappError] = useState('');
+  const [whatsappReference, setWhatsappReference] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const whatsappBusyRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -78,6 +94,54 @@ export default function StorefrontProductPage() {
       isTracked: selectedVariant ? selectedVariant.isTracked : product.availability !== 'untracked',
     });
     setQuantity(1);
+  };
+
+  const handleOrderOnWhatsApp = async () => {
+    if (!product || !inStock || whatsappBusyRef.current) return;
+
+    whatsappBusyRef.current = true;
+    setWhatsappBusy(true);
+    setWhatsappError('');
+    setCopied(false);
+
+    try {
+      const created = await createStorefrontCheckoutReference({
+        storeSlug,
+        items: [{
+          productId: product.id,
+          variantId: selectedVariant?.id ?? null,
+          quantity,
+        }],
+        channel: 'whatsapp',
+      });
+      setWhatsappReference(created);
+
+      const handoffUrl = buildWhatsAppHandoffUrl({
+        phone: store.contactPhone,
+        storeName: store.name,
+        checkoutPath: created.checkoutPath,
+      });
+      if (handoffUrl) {
+        window.open(handoffUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (handoffError) {
+      setWhatsappError(toStorefrontServiceError(handoffError).message);
+    } finally {
+      whatsappBusyRef.current = false;
+      setWhatsappBusy(false);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    if (!whatsappReference) return;
+    const checkoutUrl = buildCheckoutUrl(whatsappReference.checkoutPath);
+
+    try {
+      await navigator.clipboard.writeText(checkoutUrl);
+      setCopied(true);
+    } catch {
+      setWhatsappError(`Copy this link: ${checkoutUrl}`);
+    }
   };
 
   if (loading) {
@@ -252,6 +316,50 @@ export default function StorefrontProductPage() {
                 <ShoppingBag className="h-4 w-4" aria-hidden="true" />
                 {inStock ? 'Add to cart' : 'Out of stock'}
               </Button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <Button
+                className="w-full"
+                variant="secondary"
+                disabled={!inStock || whatsappBusy}
+                onClick={handleOrderOnWhatsApp}
+              >
+                {whatsappBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                )}
+                {whatsappBusy ? 'Creating secure link…' : 'Order on WhatsApp'}
+              </Button>
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                The assistant confirms your details and the business approves the order before payment.
+              </p>
+              {!store.contactPhone ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  No WhatsApp number is published. You can copy the secure link after creating it.
+                </p>
+              ) : null}
+              {whatsappReference ? (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-medium text-slate-700">Secure checkout link</p>
+                  <input
+                    readOnly
+                    value={buildCheckoutUrl(whatsappReference.checkoutPath)}
+                    className="mt-2 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-xs text-slate-600"
+                    aria-label="Secure checkout link"
+                  />
+                  <Button className="mt-2" size="sm" variant="ghost" onClick={handleCopyLink}>
+                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    {copied ? 'Copied' : 'Copy link'}
+                  </Button>
+                </div>
+              ) : null}
+              {whatsappError ? (
+                <Alert className="mt-3" variant="error" title="WhatsApp handoff failed">
+                  {whatsappError}
+                </Alert>
+              ) : null}
             </div>
 
             <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-sm">

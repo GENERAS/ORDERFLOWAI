@@ -33,6 +33,14 @@ function toNullableText(value) {
   return normalized || null;
 }
 
+function toCheckoutItems(items = []) {
+  return items.map((item) => ({
+    product_id: item.productId,
+    variant_id: item.variantId || null,
+    quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
+  }));
+}
+
 export function toStorefrontServiceError(error) {
   if (error instanceof StorefrontServiceError) return error;
 
@@ -203,6 +211,65 @@ export async function getStorefrontProduct({ storeSlug, productId }) {
   };
 }
 
+export async function createStorefrontCheckoutReference({
+  storeSlug,
+  items = [],
+  channel = 'online_store',
+}) {
+  const supabase = getClient();
+  const { data, error } = await supabase.rpc('create_storefront_checkout_reference', {
+    p_store_slug: storeSlug,
+    p_items: toCheckoutItems(items),
+    p_channel: channel,
+  });
+  if (error) throw toStorefrontServiceError(error);
+
+  const row = unwrapRpc(data);
+  if (!row?.reference) {
+    throw new StorefrontServiceError('A secure checkout link could not be created.');
+  }
+
+  return {
+    reference: row.reference,
+    checkoutPath: row.checkout_path,
+    expiresAt: row.expires_at,
+    itemCount: Number(row.item_count ?? items.length),
+    currency: row.currency,
+  };
+}
+
+export async function getStorefrontCheckoutReference({ storeSlug, reference }) {
+  const supabase = getClient();
+  const { data, error } = await supabase.rpc('get_storefront_checkout_reference', {
+    p_store_slug: storeSlug,
+    p_reference: reference,
+  });
+  if (error) throw toStorefrontServiceError(error);
+
+  const row = unwrapRpc(data);
+  if (!row) throw new StorefrontServiceError('This checkout link is no longer valid.');
+
+  return {
+    storeName: row.store_name,
+    storeSlug: row.store_slug,
+    currency: row.currency,
+    items: (Array.isArray(row.items) ? row.items : []).map((item) => ({
+      productId: item.productId,
+      variantId: item.variantId || null,
+      name: item.name,
+      variantName: item.variantName ?? '',
+      imageUrl: null,
+      price: Number(item.unitPrice ?? 0),
+      currency: row.currency,
+      quantity: Number(item.quantity ?? 1),
+      lineTotal: Number(item.lineTotal ?? 0),
+    })),
+    estimatedTotal: Number(row.estimated_total ?? 0),
+    expiresAt: row.expires_at,
+    channel: row.channel,
+  };
+}
+
 export async function submitStorefrontOrder({
   storeSlug,
   customerName,
@@ -213,9 +280,11 @@ export async function submitStorefrontOrder({
   instructions = '',
   items = [],
   idempotencyKey = null,
+  checkoutReference = null,
+  channel = null,
 }) {
   const supabase = getClient();
-  const { data, error } = await supabase.rpc('submit_storefront_order', {
+  const payload = {
     p_store_slug: storeSlug,
     p_customer_name: customerName,
     p_phone: phone,
@@ -223,13 +292,17 @@ export async function submitStorefrontOrder({
     p_address: toNullableText(address),
     p_city: toNullableText(city),
     p_instructions: toNullableText(instructions),
-    p_items: items.map((item) => ({
-      product_id: item.productId,
-      variant_id: item.variantId || null,
-      quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
-    })),
+    p_items: toCheckoutItems(items),
     p_idempotency_key: idempotencyKey,
-  });
+  };
+
+  const { data, error } = checkoutReference
+    ? await supabase.rpc('submit_storefront_order', {
+        ...payload,
+        p_checkout_reference: checkoutReference,
+        p_channel: channel || 'whatsapp',
+      })
+    : await supabase.rpc('submit_storefront_order', payload);
   if (error) throw toStorefrontServiceError(error);
 
   const row = unwrapRpc(data);

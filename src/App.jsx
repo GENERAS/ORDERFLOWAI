@@ -110,6 +110,10 @@ export default function App() {
               <Route index element={<PublicStorefrontPage />} />
               <Route path="products/:productId" element={<StorefrontProductPage />} />
               <Route path="checkout" element={<StorefrontCheckoutPage />} />
+              <Route
+                path="checkout/:reference"
+                element={<StorefrontCheckoutPage />}
+              />
             </Route>
 
             <Route element={<RequireAuth />}>

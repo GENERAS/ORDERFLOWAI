@@ -105,6 +105,20 @@ export function clearCart(storeSlug) {
   window.localStorage.removeItem(getCartStorageKey(storeSlug));
 }
 
+export function buildCheckoutUrl(checkoutPath) {
+  if (typeof window === 'undefined') return checkoutPath;
+  return new URL(checkoutPath, window.location.origin).toString();
+}
+
+export function buildWhatsAppHandoffUrl({ phone, storeName, checkoutPath }) {
+  const digits = String(phone ?? '').replace(/\D/g, '');
+  if (!digits) return null;
+
+  const checkoutUrl = buildCheckoutUrl(checkoutPath);
+  const message = `Hello ${storeName}, I would like to continue this order: ${checkoutUrl}`;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
 export function getCartCount(items) {
   return items.reduce((total, item) => total + item.quantity, 0);
 }
