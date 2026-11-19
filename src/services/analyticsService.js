@@ -215,6 +215,21 @@ export function mapChannelBreakdown(row) {
   };
 }
 
+export function mapReportInsights(row) {
+  const source = unwrapRpc(row) ?? {};
+  return {
+    averageProcessingHours: toNumber(source.average_processing_hours),
+    timedCompletedOrders: toNumber(source.timed_completed_orders),
+    activeEmployees: toNumber(source.active_employees),
+    aiPreparedOrders: toNumber(source.ai_prepared_orders),
+    aiApprovedOrders: toNumber(source.ai_approved_orders),
+    repeatCustomers: toNumber(source.repeat_customers),
+    customersWithOrders: toNumber(source.customers_with_orders),
+    repeatCustomerRate: toNumber(source.repeat_customer_rate),
+    lowStockItems: toNumber(source.low_stock_items),
+  };
+}
+
 export async function getWorkspaceDashboardData(businessId) {
   assertBusinessId(businessId);
 
@@ -295,4 +310,15 @@ export async function getWorkspaceChannelBreakdown(options = {}) {
 
   if (error) throw toAnalyticsServiceError(error);
   return toArrayValue(data).map(mapChannelBreakdown);
+}
+
+export async function getWorkspaceReportInsights(options = {}) {
+  const supabase = getClient();
+  const { data, error } = await supabase.rpc(
+    'workspace_get_report_insights',
+    reportParams(options),
+  );
+
+  if (error) throw toAnalyticsServiceError(error);
+  return mapReportInsights(data);
 }

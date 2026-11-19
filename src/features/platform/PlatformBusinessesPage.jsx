@@ -36,7 +36,6 @@ const supportRoles = Object.freeze([
   { value: 'staff', label: 'Staff' },
   { value: 'manager', label: 'Manager' },
   { value: 'admin', label: 'Admin' },
-  { value: 'owner', label: 'Owner' },
 ]);
 
 function formatCount(value) {

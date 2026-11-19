@@ -79,16 +79,16 @@ export default function PlatformSubscriptionsPage() {
 
       <Alert
         variant={configured ? 'info' : 'warning'}
-        title={configured ? 'Billing records available' : 'Platform billing is not configured'}
+        title={configured ? 'Local subscription records' : 'Platform billing is not configured'}
       >
         {configured
-          ? 'Subscription records below come from platform billing configuration.'
+          ? 'These are local plan assignments only. No live payment gateway or platform billing provider is connected.'
           : 'No billing integration is connected, so no subscription or platform revenue figures are reported.'}
       </Alert>
 
       <SectionCard
         title="Subscription records"
-        description="Empty until a platform billing integration is configured."
+        description="Local plan assignments recorded for each business workspace."
       >
         <ResourcePanel
           state={state}

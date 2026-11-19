@@ -12,6 +12,7 @@ import {
   Search,
   ShoppingCart,
   Timer,
+  X,
   XCircle,
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
@@ -28,6 +29,7 @@ import {
 import { EmptyState } from '../../components/ui/EmptyState';
 import { FormField } from '../../components/ui/FormField';
 import { SelectField } from '../../components/ui/SelectField';
+import { controlClasses, labelClasses } from '../../components/ui/formStyles';
 import {
   approveAIOrder,
   cancelAIOrderDraft,
@@ -51,6 +53,21 @@ import {
   ORDER_SORT_OPTIONS,
   ORDER_STATUS_OPTIONS,
 } from './orderUtils';
+
+const REASON_ACTIONS = Object.freeze({
+  reject: {
+    title: 'Reject order draft',
+    label: 'Reason for rejecting this order?',
+  },
+  clarify: {
+    title: 'Request clarification',
+    label: 'What needs clarification?',
+  },
+  cancel: {
+    title: 'Cancel order draft',
+    label: 'Reason for cancelling this draft?',
+  },
+});
 
 const OVERVIEW_TONES = Object.freeze({
   brand: 'border-brand-100 bg-brand-50/70 text-brand-700',
@@ -96,6 +113,9 @@ export default function OrdersPage() {
   const [preparationsLoading, setPreparationsLoading] = useState(true);
   const [preparationError, setPreparationError] = useState('');
   const [busyPreparation, setBusyPreparation] = useState(null);
+  const [reasonDialog, setReasonDialog] = useState(null);
+  const [reasonValue, setReasonValue] = useState('');
+  const [reasonError, setReasonError] = useState('');
   const [preparationRefresh, setPreparationRefresh] = useState(0);
   const [storefrontOrders, setStorefrontOrders] = useState([]);
   const [storefrontQueueLoading, setStorefrontQueueLoading] = useState(true);
@@ -261,20 +281,8 @@ export default function OrdersPage() {
     setPage(nextPage);
   };
 
-  const runPreparationAction = async (item, action) => {
-    if (!item?.orderId) return;
-
-    const reasonPrompts = {
-      reject: 'Reason for rejecting this order?',
-      clarify: 'What needs clarification?',
-      cancel: 'Reason for cancelling this draft?',
-    };
-    let reason = null;
-    if (reasonPrompts[action]) {
-      const entered = window.prompt(reasonPrompts[action]);
-      if (!entered?.trim()) return;
-      reason = entered.trim().slice(0, 500);
-    }
+  const executePreparationAction = async (item, action, reason = null) => {
+    if (!item?.orderId) return false;
 
     const actionKey = `${action}:${item.orderId}`;
     setBusyPreparation(actionKey);
@@ -294,11 +302,41 @@ export default function OrdersPage() {
       };
       setSuccess(successMessages[action]);
       setPreparationRefresh((value) => value + 1);
+      return true;
     } catch (actionError) {
       setPreparationError(getAIAssistantErrorMessage(actionError));
+      return false;
     } finally {
       setBusyPreparation(null);
     }
+  };
+
+  const runPreparationAction = (item, action) => {
+    if (REASON_ACTIONS[action]) {
+      setReasonDialog({ item, action });
+      setReasonValue('');
+      setReasonError('');
+      return;
+    }
+    executePreparationAction(item, action);
+  };
+
+  const submitReasonAction = async (event) => {
+    event.preventDefault();
+    if (!reasonDialog) return;
+
+    const reason = reasonValue.trim().slice(0, 500);
+    if (!reason) {
+      setReasonError('Enter a reason before continuing.');
+      return;
+    }
+
+    const completed = await executePreparationAction(
+      reasonDialog.item,
+      reasonDialog.action,
+      reason,
+    );
+    if (completed) setReasonDialog(null);
   };
 
   const hasFilters =
@@ -839,6 +877,86 @@ export default function OrdersPage() {
         Business approval reserves tracked stock. Fulfilment consumes the
         reservation. Cancelling releases any reserved stock.
       </div>
+
+      {reasonDialog ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setReasonDialog(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="preparation-reason-title"
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2
+                  id="preparation-reason-title"
+                  className="text-lg font-semibold text-slate-900"
+                >
+                  {REASON_ACTIONS[reasonDialog.action]?.title}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {reasonDialog.item?.orderNumber}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Close reason dialog"
+                onClick={() => setReasonDialog(null)}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+            <form onSubmit={submitReasonAction} className="mt-5 space-y-3">
+              <div>
+                <label htmlFor="preparation-reason" className={labelClasses}>
+                  {REASON_ACTIONS[reasonDialog.action]?.label}
+                </label>
+                <textarea
+                  id="preparation-reason"
+                  rows={3}
+                  autoFocus
+                  maxLength={500}
+                  value={reasonValue}
+                  onChange={(event) => {
+                    setReasonValue(event.target.value);
+                    setReasonError('');
+                  }}
+                  className={`${controlClasses} mt-1.5`}
+                  placeholder="Enter a short reason for the audit trail"
+                />
+                {reasonError ? (
+                  <p className="mt-1.5 text-xs font-medium text-red-600">
+                    {reasonError}
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-xs text-slate-400">
+                    {reasonValue.length}/500
+                  </p>
+                )}
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => setReasonDialog(null)}
+                  disabled={Boolean(busyPreparation)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={Boolean(busyPreparation)}>
+                  Continue
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

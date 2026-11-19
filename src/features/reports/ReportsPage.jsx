@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import {
+  Activity,
   BadgeCheck,
   BarChart3,
+  Bot,
   CircleDollarSign,
+  Clock3,
   CreditCard,
   Loader2,
   Package,
   RefreshCw,
+  Repeat2,
   ShoppingCart,
   Users,
 } from 'lucide-react';
@@ -25,6 +29,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { FormField } from '../../components/ui/FormField';
 import {
   getWorkspaceChannelBreakdown,
+  getWorkspaceReportInsights,
   getWorkspaceReportSeries,
   getWorkspaceReportSummary,
   getWorkspaceTopCustomers,
@@ -56,6 +61,12 @@ function ReportStatCard({ label, value, detail, icon: Icon, tone }) {
 
 function formatCount(value) {
   return new Intl.NumberFormat('en-RW').format(Math.max(0, Math.floor(value || 0)));
+}
+
+function formatHours(value) {
+  const hours = Math.max(0, Number(value) || 0);
+  if (hours < 1) return `${Math.round(hours * 60)} min`;
+  return `${hours.toFixed(1)} h`;
 }
 
 function statusVariant(status) {
@@ -90,6 +101,7 @@ export default function ReportsPage() {
     products: [],
     customers: [],
     channels: [],
+    insights: null,
   });
   const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0);
@@ -116,10 +128,11 @@ export default function ReportsPage() {
       getWorkspaceTopProducts({ businessId, from, to, limit: 8 }),
       getWorkspaceTopCustomers({ businessId, from, to, limit: 8 }),
       getWorkspaceChannelBreakdown({ businessId, from, to }),
+      getWorkspaceReportInsights({ businessId, from, to }),
     ])
-      .then(([summary, series, products, customers, channels]) => {
+      .then(([summary, series, products, customers, channels, insights]) => {
         if (!active) return;
-        setReport({ summary, series, products, customers, channels });
+        setReport({ summary, series, products, customers, channels, insights });
         setError('');
       })
       .catch((loadError) => {
@@ -311,6 +324,68 @@ export default function ReportsPage() {
           tone="slate"
         />
       </div>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle as="h2">Operational insights</CardTitle>
+            <CardDescription>
+              Processing speed, team activity, AI assisted orders, repeat
+              customers and low stock from real workspace records.
+            </CardDescription>
+          </div>
+          <Badge variant="neutral">Live</Badge>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <ReportStatCard
+              label="Avg processing"
+              value={
+                loading
+                  ? '—'
+                  : formatHours(report.insights?.averageProcessingHours ?? 0)
+              }
+              detail={`${formatCount(report.insights?.timedCompletedOrders)} timed orders`}
+              icon={Clock3}
+              tone="brand"
+            />
+            <ReportStatCard
+              label="Active employees"
+              value={loading ? '—' : formatCount(report.insights?.activeEmployees)}
+              detail="Team members with recorded activity"
+              icon={Activity}
+              tone="slate"
+            />
+            <ReportStatCard
+              label="AI assisted"
+              value={loading ? '—' : formatCount(report.insights?.aiPreparedOrders)}
+              detail={`${formatCount(report.insights?.aiApprovedOrders)} approved by the business`}
+              icon={Bot}
+              tone="emerald"
+            />
+            <ReportStatCard
+              label="Repeat customers"
+              value={
+                loading
+                  ? '—'
+                  : `${(report.insights?.repeatCustomerRate ?? 0).toFixed(1)}%`
+              }
+              detail={`${formatCount(report.insights?.repeatCustomers)} of ${formatCount(
+                report.insights?.customersWithOrders,
+              )} customers`}
+              icon={Repeat2}
+              tone="amber"
+            />
+            <ReportStatCard
+              label="Low stock"
+              value={loading ? '—' : formatCount(report.insights?.lowStockItems)}
+              detail="Tracked items at or below their threshold"
+              icon={Package}
+              tone="slate"
+            />
+          </div>
+        </CardContent>
+      </Card>
 
       {!loading && !error && !invalidRange && !hasReportData ? (
         <EmptyState

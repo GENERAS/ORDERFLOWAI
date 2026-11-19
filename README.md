@@ -4,7 +4,7 @@ AI-powered product discovery and order automation for businesses. OrderFlow AI c
 customer conversations to a business's real product catalogue, order records, inventory and
 payments through a single multi-tenant SaaS workspace.
 
-> **Current status: Day 13 — AI commerce actions and order preparation.**
+> **Current status: post-Day 13 workspace operations; final deployment and market validation pending.**
 > The app now has email/password Supabase Auth, protected routes, multi-workspace onboarding,
 > a real product catalogue, live inventory with physical, reserved and available stock,
 > customer profiles with status, tags, note history, activity and duplicate overrides, orders
@@ -13,10 +13,12 @@ payments through a single multi-tenant SaaS workspace.
 > payments, verification, refunds, payment history and currency-aware reporting, public
 > per-business storefronts with anonymous catalogue browsing and real order submission, a central
 > media layer for product images and store logos, a provider-independent channel/inbox layer
-> with official Meta WhatsApp Cloud API code paths, and an AI commerce assistant that can prepare
-> drafts and quotes but never approves orders or changes stock. No WhatsApp account, Cloudinary
-> account or AI provider is claimed connected until real credentials, deployment and live tests
-> are completed.
+> with official Meta WhatsApp Cloud API code paths, an AI commerce assistant that can prepare
+> drafts and quotes but never approves orders or changes stock, live workspace analytics, team
+> invitations, global search, notifications, a platform support console, customer follow-ups,
+> workspace settings and local subscription records. No WhatsApp account, Cloudinary account,
+> AI provider, payment gateway or subscription billing provider is claimed connected until real
+> credentials, deployment and live tests are completed.
 
 ## What is included in this build
 
@@ -873,16 +875,16 @@ instead of a Vercel 404.
 
 ## Intentionally not built yet
 
-The following are scheduled for later phases and deliberately excluded or still incomplete after Days 1–11:
+The following are scheduled for later phases or deliberately remain incomplete in this build:
 
 - Purchase orders, suppliers and automated replenishment.
-- Invoices and live payment-provider gateway integrations.
-- Public online payment collection on storefront orders.
-- AI product discovery and AI order extraction.
+- Invoices, live payment-provider gateway integrations and public online payment collection.
+- Live subscription billing; local plan records exist but no billing provider is connected.
 - Instagram or Facebook channel integrations. WhatsApp infrastructure is implemented but not connected
   to a real WABA or approved for production.
-- Visual/image product search.
-- Reports based on live data.
+- Customer-uploaded visual/image product search. Text-based AI discovery uses the real catalogue.
+- Live AI provider, Cloudinary and Edge Function deployments.
+- Final production deployment and market validation.
 
 ## Day 1 acceptance checklist
 

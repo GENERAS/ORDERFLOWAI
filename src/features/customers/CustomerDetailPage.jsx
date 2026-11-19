@@ -3,6 +3,8 @@ import {
   Activity,
   ArrowLeft,
   Building2,
+  CalendarClock,
+  Check,
   History,
   Loader2,
   Mail,
@@ -29,9 +31,13 @@ import { PageLoader } from '../../components/ui/PageLoader';
 import { controlClasses, labelClasses } from '../../components/ui/formStyles';
 import {
   addCustomerNote,
+  createCustomerFollowUp,
   deleteCustomerAddress,
+  deleteCustomerFollowUp,
   getCustomer,
+  listCustomerFollowUps,
   toCustomerServiceError,
+  updateCustomerFollowUpStatus,
 } from '../../services/customerService';
 import {
   searchOrders,
@@ -62,6 +68,13 @@ export default function CustomerDetailPage() {
   const [notes, setNotes] = useState([]);
   const [events, setEvents] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [followUps, setFollowUps] = useState([]);
+  const [followUpTitle, setFollowUpTitle] = useState('');
+  const [followUpDueAt, setFollowUpDueAt] = useState('');
+  const [followUpNotes, setFollowUpNotes] = useState('');
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
+  const [followUpError, setFollowUpError] = useState('');
+  const [busyFollowUpId, setBusyFollowUpId] = useState(null);
   const [noteBody, setNoteBody] = useState('');
   const [noteError, setNoteError] = useState('');
   const [savingNote, setSavingNote] = useState(false);
@@ -121,6 +134,90 @@ export default function CustomerDetailPage() {
       active = false;
     };
   }, [businessId, customerId, refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    if (!businessId || !customerId) return undefined;
+
+    listCustomerFollowUps({ businessId, customerId })
+      .then((rows) => {
+        if (active) setFollowUps(rows);
+      })
+      .catch((loadError) => {
+        if (active) setFollowUpError(toCustomerServiceError(loadError).message);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [businessId, customerId, refreshKey]);
+
+  const handleAddFollowUp = async (event) => {
+    event.preventDefault();
+    const title = followUpTitle.trim();
+    if (!title) {
+      setFollowUpError('Enter a follow-up title.');
+      return;
+    }
+
+    setSavingFollowUp(true);
+    setFollowUpError('');
+    setError('');
+    setSuccess('');
+
+    try {
+      await createCustomerFollowUp({
+        businessId,
+        customerId,
+        title,
+        dueAt: followUpDueAt ? `${followUpDueAt}T12:00:00.000Z` : null,
+        notes: followUpNotes,
+      });
+      setFollowUpTitle('');
+      setFollowUpDueAt('');
+      setFollowUpNotes('');
+      setSuccess('Follow-up added.');
+      setRefreshKey((current) => current + 1);
+    } catch (saveError) {
+      setFollowUpError(toCustomerServiceError(saveError).message);
+    } finally {
+      setSavingFollowUp(false);
+    }
+  };
+
+  const handleFollowUpStatus = async (followUp, status) => {
+    setBusyFollowUpId(followUp.id);
+    setFollowUpError('');
+    setError('');
+    setSuccess('');
+
+    try {
+      await updateCustomerFollowUpStatus(followUp.id, status);
+      setSuccess(status === 'completed' ? 'Follow-up completed.' : 'Follow-up reopened.');
+      setRefreshKey((current) => current + 1);
+    } catch (updateError) {
+      setFollowUpError(toCustomerServiceError(updateError).message);
+    } finally {
+      setBusyFollowUpId(null);
+    }
+  };
+
+  const handleDeleteFollowUp = async (followUp) => {
+    setBusyFollowUpId(followUp.id);
+    setFollowUpError('');
+    setError('');
+    setSuccess('');
+
+    try {
+      await deleteCustomerFollowUp(followUp.id);
+      setSuccess('Follow-up removed.');
+      setRefreshKey((current) => current + 1);
+    } catch (deleteError) {
+      setFollowUpError(toCustomerServiceError(deleteError).message);
+    } finally {
+      setBusyFollowUpId(null);
+    }
+  };
 
   const handleAddressSaved = (saved) => {
     setAddressDialog(null);
@@ -512,6 +609,137 @@ export default function CustomerDetailPage() {
                 </ol>
               ) : (
                 <p className="mt-4 text-sm text-slate-400">No notes added yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div>
+                <CardTitle>Follow-ups</CardTitle>
+                <CardDescription>
+                  Tasks and reminders linked to this customer record.
+                </CardDescription>
+              </div>
+              <CalendarClock
+                className="h-4 w-4 shrink-0 text-slate-400"
+                aria-hidden="true"
+              />
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleAddFollowUp} className="space-y-3">
+                <div>
+                  <label htmlFor="follow-up-title" className={labelClasses}>
+                    Follow-up title
+                  </label>
+                  <input
+                    id="follow-up-title"
+                    value={followUpTitle}
+                    maxLength={160}
+                    required
+                    onChange={(event) => setFollowUpTitle(event.target.value)}
+                    className={`${controlClasses} mt-1.5`}
+                    placeholder="Call back about delivery"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="follow-up-due" className={labelClasses}>
+                    Due date
+                  </label>
+                  <input
+                    id="follow-up-due"
+                    type="date"
+                    value={followUpDueAt}
+                    onChange={(event) => setFollowUpDueAt(event.target.value)}
+                    className={`${controlClasses} mt-1.5`}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="follow-up-notes" className={labelClasses}>
+                    Notes
+                  </label>
+                  <textarea
+                    id="follow-up-notes"
+                    rows={2}
+                    value={followUpNotes}
+                    maxLength={2000}
+                    onChange={(event) => setFollowUpNotes(event.target.value)}
+                    className={`${controlClasses} mt-1.5`}
+                    placeholder="Optional context for the task"
+                  />
+                </div>
+                <Button type="submit" size="sm" disabled={savingFollowUp}>
+                  {savingFollowUp ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  Add follow-up
+                </Button>
+                {followUpError ? (
+                  <p className="text-xs text-red-600">{followUpError}</p>
+                ) : null}
+              </form>
+
+              {followUps.length > 0 ? (
+                <ul className="mt-5 space-y-3 border-t border-slate-100 pt-4">
+                  {followUps.map((followUp) => (
+                    <li
+                      key={followUp.id}
+                      className="rounded-lg border border-slate-200 px-3 py-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-800">
+                            {followUp.title}
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {followUp.status}
+                            {followUp.dueAt ? ` - due ${formatDate(followUp.dueAt)}` : ''}
+                            {` - ${followUp.assigneeName}`}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          {followUp.status !== 'completed' ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={Boolean(busyFollowUpId)}
+                              onClick={() => handleFollowUpStatus(followUp, 'completed')}
+                            >
+                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                              Complete
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={Boolean(busyFollowUpId)}
+                              onClick={() => handleFollowUpStatus(followUp, 'pending')}
+                            >
+                              Reopen
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={Boolean(busyFollowUpId)}
+                            onClick={() => handleDeleteFollowUp(followUp)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                          </Button>
+                        </div>
+                      </div>
+                      {followUp.notes ? (
+                        <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-slate-600">
+                          {followUp.notes}
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-4 text-sm text-slate-400">No follow-ups yet.</p>
               )}
             </CardContent>
           </Card>

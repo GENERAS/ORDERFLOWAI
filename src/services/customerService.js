@@ -462,3 +462,79 @@ export async function deleteCustomerAddress(addressId) {
   if (error) throw toCustomerServiceError(error);
   return Boolean(data);
 }
+
+function toFollowUpTimestamp(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+export function mapCustomerFollowUp(row) {
+  return {
+    id: row.id ?? null,
+    customerId: row.customer_id ?? null,
+    customerName: row.customer_name ?? '',
+    title: row.title ?? '',
+    notes: row.notes ?? '',
+    dueAt: row.due_at ?? null,
+    status: row.status ?? 'pending',
+    assigneeName: row.assignee_name ?? 'Unassigned',
+    createdAt: row.created_at ?? null,
+    completedAt: row.completed_at ?? null,
+  };
+}
+
+export async function listCustomerFollowUps({ businessId, customerId = null } = {}) {
+  if (!businessId) return [];
+  const supabase = getClient();
+  const { data, error } = await supabase.rpc('workspace_list_customer_follow_ups', {
+    p_business_id: businessId,
+    p_customer_id: customerId,
+  });
+
+  if (error) throw toCustomerServiceError(error);
+  return (data ?? []).map(mapCustomerFollowUp);
+}
+
+export async function createCustomerFollowUp({
+  businessId,
+  customerId,
+  title,
+  dueAt = null,
+  notes = '',
+  assignedTo = null,
+}) {
+  const supabase = getClient();
+  const { error } = await supabase.rpc('workspace_create_customer_follow_up', {
+    p_business_id: businessId,
+    p_customer_id: customerId,
+    p_title: String(title ?? '').trim(),
+    p_due_at: toFollowUpTimestamp(dueAt),
+    p_notes: String(notes ?? '').trim() || null,
+    p_assigned_to: assignedTo,
+  });
+
+  if (error) throw toCustomerServiceError(error);
+  return true;
+}
+
+export async function updateCustomerFollowUpStatus(followUpId, status) {
+  const supabase = getClient();
+  const { error } = await supabase.rpc('workspace_update_customer_follow_up_status', {
+    p_follow_up_id: followUpId,
+    p_status: status,
+  });
+
+  if (error) throw toCustomerServiceError(error);
+  return true;
+}
+
+export async function deleteCustomerFollowUp(followUpId) {
+  const supabase = getClient();
+  const { error } = await supabase.rpc('workspace_delete_customer_follow_up', {
+    p_follow_up_id: followUpId,
+  });
+
+  if (error) throw toCustomerServiceError(error);
+  return true;
+}
