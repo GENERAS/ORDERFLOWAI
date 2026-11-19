@@ -205,7 +205,38 @@ export async function fetchProfile(userId) {
   return mapProfile(data);
 }
 
+function mapSuperAdminMembership(row) {
+  return mapMembership(
+    {
+      id: `super-admin-${row.id}`,
+      business_id: row.id,
+      user_id: row.user_id,
+      role: row.role,
+      status: row.status,
+      created_at: row.created_at,
+    },
+    mapBusiness(row),
+  );
+}
+
+export async function fetchSuperAdminBusinesses() {
+  const supabase = getClient();
+  const { data, error } = await supabase.rpc('super_admin_list_businesses');
+
+  if (error) {
+    if (error.code === '42501' || /super administrator/i.test(error.message ?? '')) {
+      return [];
+    }
+    throw toAuthServiceError(error);
+  }
+
+  return (data ?? []).map(mapSuperAdminMembership);
+}
+
 export async function fetchMemberships(userId) {
+  const superAdminMemberships = await fetchSuperAdminBusinesses();
+  if (superAdminMemberships.length) return superAdminMemberships;
+
   const supabase = getClient();
   const { data: memberRows, error: memberError } = await supabase
     .from('business_members')
